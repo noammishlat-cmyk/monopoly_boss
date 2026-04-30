@@ -12,16 +12,65 @@ MARKET_DECAY_RATE = 0.05 # How fast the market returns to "Normal" (0.1 = 10% of
 EQUILIBRIUM_LEVEL = 100.0 # The "Neutral" level for Supply and Demand
 HISTORY_RETAIN_TIME = 1800  # 30 minutes in seconds
 
+
+MATERIALS = [
+    #  Name   | Price | Change | Supply | Demand | Updated |  Base  | Rarity Index (Higher = Rarer)
+    ('Iron'   , 100.0,   0.0,    100,     100,      0,       100.0,        2),
+    ('Gold'   , 500.0,   0.0,    100,     100,      0,       500.0,        3),
+    ('Oil'    , 300.0,   0.0,    100,     100,      0,       300.0,        4),
+    ('Wood'   , 20.0,    0.0,    100,     100,      0,        20.0,        1),
+]
+
 app = Flask(__name__)
 CORS(app)
 
 # --- WEB ROUTES ---
 
-@app.route('/api/state/<u_id>')
+@app.route('/api/get_user/<u_id>')
 def get_game_state(u_id):
-    # Get the item the user is currently looking at for the graph
-    selected_item = request.args.get('item', 'Iron').capitalize()
+    conn = sqlite3.connect('market.db')
+    cursor = conn.cursor()
+
+    # 1. FETCH USER DATA (Including Workforce)
+    cursor.execute("""
+        SELECT balance, max_workforce, workers_extraction, workers_rnd, workers_espionage 
+        FROM users WHERE user_id = ?
+    """, (u_id,))
     
+    user_res = cursor.fetchone()
+    
+    if user_res:
+        balance, max_total, w_ext, w_rnd, w_esp = user_res
+    else:
+        # Default fallback if user doesn't exist
+        balance, max_total, w_ext, w_rnd, w_esp = 0, 0, 0, 0, 0
+
+    # 2. FETCH INVENTORY
+    cursor.execute("SELECT resource_name, amount FROM inventory WHERE user_id = ?", (u_id,))
+    inv_rows = cursor.fetchall()
+    inventory = {row[0]: row[1] for row in inv_rows}
+
+    # 3. FORMAT THE WORKFORCE DATA
+    deployed_workers = {
+        "extraction": w_ext,
+        "rnd": w_rnd,
+        "espionage": w_esp
+    }
+
+    now = time.time()
+    next_tick = now + (TICK_INTERVAL - (now % TICK_INTERVAL))
+
+    return jsonify({
+        "balance": round(balance, 2),
+        "inventory": inventory,
+        "max_workforce": max_total,
+        "deployed_workers": deployed_workers,
+        "next_tick": next_tick,
+        "server_time": now,
+    })
+
+@app.route('/api/state/prices')
+def get_prices():
     conn = sqlite3.connect('market.db')
     cursor = conn.cursor()
     
@@ -29,8 +78,10 @@ def get_game_state(u_id):
     cursor.execute("SELECT name, price, supply, demand, base_price FROM resources")
     market_rows = cursor.fetchall()
     market_data = []
+    resource_names = []
     for row in market_rows:
         name, price, supply, demand, base_price = row
+        resource_names.append(name)
         market_data.append({
             "name": name,
             "price": round(price, 2),
@@ -39,30 +90,25 @@ def get_game_state(u_id):
             "base_price": base_price
         })
 
-    # 2. FETCH USER
-    cursor.execute("SELECT balance FROM users WHERE user_id = ?", (u_id,))
-    user_res = cursor.fetchone()
-    balance = user_res[0] if user_res else 0
+    all_histories = {}
     
-    cursor.execute("SELECT resource_name, amount FROM inventory WHERE user_id = ?", (u_id,))
-    inv_rows = cursor.fetchall()
-    inventory = {row[0]: row[1] for row in inv_rows}
+    for name in resource_names:
+        cursor.execute("""
+            SELECT price, timestamp FROM price_history 
+            WHERE resource_name = ? 
+            ORDER BY timestamp DESC LIMIT 30
+        """, (name,))
+        hist_rows = cursor.fetchall()
+        
+        item_history = []
+        for row in reversed(hist_rows):
+            item_history.append({
+                "time": time.strftime('%H:%M:%S', time.localtime(row[1])),
+                "price": round(row[0], 2)
+            })
+        all_histories[name] = item_history
 
-    # 3. FETCH HISTORY (For the selected item only)
-    cursor.execute("""
-        SELECT price, timestamp FROM price_history 
-        WHERE resource_name = ? 
-        ORDER BY timestamp DESC LIMIT 30
-    """, (selected_item,))
-    hist_rows = cursor.fetchall()
-    history = []
-    for row in reversed(hist_rows):
-        history.append({
-            "time": time.strftime('%H:%M:%S', time.localtime(row[1])),
-            "price": round(row[0], 2)
-        })
-
-    # 4. CALCULATE NEXT TICK
+    # 3. CALCULATE NEXT TICK
     now = time.time()
     next_tick = now + (TICK_INTERVAL - (now % TICK_INTERVAL))
 
@@ -71,15 +117,73 @@ def get_game_state(u_id):
     # THE BIG JSON
     return jsonify({
         "market": market_data,
-        "user": {
-            "balance": round(balance, 2),
-            "inventory": inventory
-        },
-        "history": history,
+        "history": all_histories,
         "next_tick": next_tick,
         "tick_length": TICK_INTERVAL,
         "server_time": now
     })
+
+@app.route('/api/deploy_workers/<u_id>', methods=['POST'])
+def deploy_workers(u_id):
+    data = request.get_json()
+    u_id = data.get('user_id', '')
+
+    if u_id == '':
+        return jsonify({
+                "error": "user_id does not exist",
+            }), 400
+
+    # Get values from the request, default to 0 if missing
+    # We use abs(int()) to ensure we don't get decimals or negative numbers
+    try:
+        ext = abs(int(data.get('extraction', 0)))
+        rnd = abs(int(data.get('rnd', 0)))
+        esp = abs(int(data.get('espionage', 0)))
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid worker counts provided"}), 400
+
+    conn = sqlite3.connect('market.db')
+    cursor = conn.cursor()
+
+    try:
+        # 1. FETCH MAX WORKFORCE
+        cursor.execute("SELECT max_workforce FROM users WHERE user_id = ?", (u_id,))
+        res = cursor.fetchone()
+        
+        if not res:
+            return jsonify({"error": "User not found"}), 404
+        
+        max_limit = res[0]
+        total_requested = ext + rnd + esp
+
+        # 2. SAFETY MECHANISM
+        if total_requested > max_limit:
+            return jsonify({
+                "error": "Workforce limit exceeded",
+                "requested": total_requested,
+                "max": max_limit
+            }), 400
+
+        # 3. UPDATE DATABASE
+        cursor.execute("""
+            UPDATE users SET 
+            workers_extraction = ?, 
+            workers_rnd = ?, 
+            workers_espionage = ? 
+            WHERE user_id = ?
+        """, (ext, rnd, esp, u_id))
+
+        conn.commit()
+        return jsonify({
+            "message": "Workers reassigned successfully",
+            "distribution": {"extraction": ext, "rnd": rnd, "espionage": esp}
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
+
 
 @app.route('/api/buy', methods=['POST'])
 def buy_resource():
@@ -225,55 +329,221 @@ def run_tick():
     conn.commit()
     conn.close()
 
+    handle_workers_done()
+
 
 def market_loop():
     while True:
-        run_tick()
-        
         now = time.time()
         time_to_next = TICK_INTERVAL - (now % TICK_INTERVAL)
         time.sleep(time_to_next) 
-       
+
+        run_tick()
+
+
+def sync_table_schema(conn, table_name, schema_definition):
+    """
+    Ensures the table exists and has all columns defined in the schema_definition.
+    Note: schema_definition should be the content inside the CREATE TABLE (...)
+    """
+    cursor = conn.cursor()
+    
+    # 1. Create the table if it doesn't exist at all
+    conn.execute(f"CREATE TABLE IF NOT EXISTS {table_name} ({schema_definition})")
+    
+    # 2. Get existing columns from the DB
+    cursor.execute(f"PRAGMA table_info({table_name})")
+    existing_columns = {row[1] for row in cursor.fetchall()}
+    
+    # 3. Parse the schema_definition to find column names and types
+    # This is a simple parser that looks for lines starting with column names
+    for line in schema_definition.strip().split(','):
+        parts = line.strip().split()
+        if not parts: continue
+        
+        column_name = parts[0].replace('"', '').replace('`', '')
+        
+        # If the column name isn't in the DB and isn't a table constraint (like PRIMARY KEY)
+        if column_name not in existing_columns and column_name.upper() not in ("PRIMARY", "FOREIGN", "CONSTRAINT", "UNIQUE"):
+            # Construct the ALTER TABLE command
+            # We join the rest of the line back together to get the type and defaults
+            column_def = " ".join(parts[1:])
+            try:
+                conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_def}")
+                print(f"Migration: Added column '{column_name}' to table '{table_name}'")
+            except sqlite3.OperationalError as e:
+                print(f"Migration Error on '{column_name}': {e}")
+
+def handle_workers_done():
+    conn = sqlite3.connect('market.db')
+    cursor = conn.cursor()
+
+    handle_workers_reward(cursor)
+
+    # RESET ALL WORKERS ACROSS ALL PLAYERS
+    cursor.execute("""
+        UPDATE users SET 
+        workers_extraction = 0, 
+        workers_rnd = 0, 
+        workers_espionage = 0
+    """)
+    print("Tick Event: All workers have returned to base.")
+
+    conn.commit()
+    conn.close()
+
+def handle_workers_reward(cursor: sqlite3.Cursor):
+    # Get all users who have any extraction workers
+    cursor.execute("SELECT user_id, workers_extraction, workers_rnd, max_workforce FROM users WHERE workers_extraction > 0 OR workers_rnd > 0")
+    active_users = cursor.fetchall()
+
+    cursor.execute("SELECT name, rarity_index FROM resources")
+    # Creates a rarity map
+    rarity_map = {row[0]: row[1] for row in cursor.fetchall()}
+
+    for u_id, ext_count, rnd_count, max_wf in active_users:
+        # Start with the random split
+        rnd_splitter = random.randint(0, rnd_count)
+        # Apply 25% / 75% "Safety Zone"
+        floor = int(rnd_count / 4)
+        ceiling = int(rnd_count / 4 * 3)
+        # Clamp the value between floor and ceiling
+        rnd_splitter = max(floor, min(rnd_splitter, ceiling))
+        # Apply the Efficiency Cap (Cannot have more enhancers than extractors)
+        # This ensures research doesn't exceed the actual workforce capability.
+        enhancers = min(rnd_splitter, ext_count)
+        # Give the remainder to recruiters
+        recruiters = rnd_count - enhancers
+
+        print(f"Split the workers for User {u_id} into - {enhancers} enhancers and - {recruiters} recruiters.")
+
+        overall_recruted = 0
+
+        # Calculate success chance for each recruiting
+        # success = 15%
+        success_threshold = 15
+
+        for _ in range(recruiters):
+            roll = random.uniform(0, 100)
+            
+            if roll <= success_threshold:
+                # SUCCESS
+                overall_recruted += 1
+                print(f"User {u_id}-{_} recruted Someone (Chance: {success_threshold:.1f}%)")
+            else:
+                print(f"User {u_id}-{_} recruting failed (Rolled {roll:.1f} vs {success_threshold:.1f}%)")
+
+
+        # Calculate success chance for gathering materials
+        resources = list(rarity_map.keys())
+        overall_rewards = {}
+        for _ in range(ext_count):
+            rnd_ratio = enhancers / max(max_wf, 1)
+            weights = []
+            for res_name in resources:
+                rarity = rarity_map[res_name]
+                target_weight = (rnd_ratio * rarity) + (1 - rnd_ratio) * (1 / rarity)
+                weights.append(target_weight)
+
+            # Pick the target based on weights
+            resource_to_mine = random.choices(resources, weights=weights, k=1)[0]
+            rarity = rarity_map[resource_to_mine]
+
+            # --- SUCCESS CALCULATION ---
+            # base_potential is your "skill" (25% to 100%) - This isn't actually a 100% success, only if they managed to find anything at all
+            base_potential = 25 + (rnd_ratio * 75) 
+            # Flatten the rarity impact
+            stability_factor = 0.6 
+            dampened_rarity = math.pow(rarity, stability_factor)
+            # Calculate final threshold
+            final_success_threshold = base_potential / dampened_rarity
+            # Clamp a minimum success floor so it's never 0%
+            final_success_threshold = max(final_success_threshold, 5.0)
+
+            roll = random.uniform(0, 100)
+            
+            if roll <= final_success_threshold:
+                # SUCCESS: Track which specific resource was found
+                overall_rewards[resource_to_mine] = overall_rewards.get(resource_to_mine, 0) + 1
+                print(f"User {u_id}-{_} mined {resource_to_mine} (Chance: {final_success_threshold:.1f}%)")
+            else:
+                # FAILED
+                print(f"User {u_id}-{_} mining failed to mine {resource_to_mine} (Rolled {roll:.1f} vs {final_success_threshold:.1f}%)")
+                pass
+
+
+        if overall_recruted > 0:
+            cursor.execute("""
+                UPDATE users 
+                SET max_workforce = max_workforce + ? 
+                WHERE user_id = ?
+            """, (overall_recruted, u_id))
+            print(f"User {u_id} expanded workforce capacity by {overall_recruted}!")
+        else:
+            print(f"User {u_id} recruiting failed completely")
+
+        if overall_rewards:
+            for res_name, amount in overall_rewards.items():
+                cursor.execute("""
+                    INSERT INTO inventory (user_id, resource_name, amount) 
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(user_id, resource_name) 
+                    DO UPDATE SET amount = amount + ?
+                """, (u_id, res_name, amount, amount))
+            
+            # Summary print
+            summary = ", ".join([f"{amt}x {name}" for name, amt in overall_rewards.items()])
+            print(f"User {u_id} successfully gathered: {summary}")
+        else:
+            print(f"User {u_id} mining failed completely")
 
 # --- INITIALIZATION ---
 if __name__ == "__main__":
     conn = sqlite3.connect('market.db')
 
-    # Added base_price column to the schema
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS resources (
-            name TEXT PRIMARY KEY, 
-            price REAL, 
-            last_change REAL, 
-            supply INTEGER, 
-            demand INTEGER, 
-            last_updated REAL,
-            base_price REAL
-        )
-    """)
+    # Define Schemas
+    RESOURCES_SCHEMA = """
+        name TEXT PRIMARY KEY, 
+        price REAL, 
+        last_change REAL, 
+        supply INTEGER, 
+        demand INTEGER, 
+        last_updated REAL,
+        base_price REAL,
+        rarity_index INTEGER
+    """
+    
+    USERS_SCHEMA = """
+        user_id TEXT PRIMARY KEY, 
+        balance REAL,
+        max_workforce INTEGER DEFAULT 10,
+        workers_extraction INTEGER DEFAULT 0,
+        workers_rnd INTEGER DEFAULT 0,
+        workers_espionage INTEGER DEFAULT 0
+    """
+
+    # Sync them!
+    sync_table_schema(conn, "resources", RESOURCES_SCHEMA)
+    sync_table_schema(conn, "users", USERS_SCHEMA)
+
+    # Standard Price History (doesn't change often, but keep it simple)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS price_history (
-            resource_name TEXT, 
-            price REAL, 
-            timestamp REAL
+            resource_name TEXT, price REAL, timestamp REAL
         )
     """)
-    conn.execute("CREATE TABLE IF NOT EXISTS inventory (user_id TEXT, resource_name TEXT, amount INTEGER, PRIMARY KEY (user_id, resource_name))")
-    conn.execute("CREATE TABLE IF NOT EXISTS users (user_id TEXT PRIMARY KEY, balance REAL)")
 
-    materials = [
-        #  Name   | Price | Change | Supply | Demand | Updated | Base
-        ('Iron'   , 100.0,   0.0,    100,     100,      0,       100.0),
-        ('Gold'   , 500.0,   0.0,    100,     100,      0,       500.0),
-        ('Oil'    , 300.0,   0.0,    100,     100,      0,       300.0),
-        ('Wood'   , 20.0,    0.0,    100,     100,      0,        20.0),
-    ]
-    
-    # Using a dynamic insert to handle the column count
-    for m in materials:
-        conn.execute("INSERT OR IGNORE INTO resources VALUES (?, ?, ?, ?, ?, ?, ?)", m)
+    # --- UPSERT DATA ---
+    # Use INSERT OR IGNORE so we don't duplicate data on every restart
+    conn.execute("""
+        INSERT OR IGNORE INTO users 
+        (user_id, balance, max_workforce, workers_extraction, workers_rnd, workers_espionage) 
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, ("user123", 1000.0, 10, 0, 0, 0))
 
-    conn.execute("INSERT OR IGNORE INTO users VALUES (?, ?)", ("user123", 1000.0))
+    for m in MATERIALS:
+        conn.execute("INSERT OR IGNORE INTO resources VALUES (?, ?, ?, ?, ?, ?, ?, ?)", m)
+
     conn.commit()
     conn.close()
 

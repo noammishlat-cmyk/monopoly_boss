@@ -25,17 +25,11 @@ export default function MonopolyBoss() {
   });
 
   const [selectedItem, setSelectedItem] = useState("Iron");
-  const [secondsRemaining, setSecondsRemaining] = useState(0);
   const [tradeAmounts, setTradeAmounts] = useState<Record<string, number>>({});
-  const [error, setError] = useState<string | null>(null);
-  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
-  const [tickInterval, setTickInterval] = useState(60);
   const [lastDeployment, setLastDeployment] = useState<typeof allocation | null>(null);
-  const [isPendingReturn, setIsPendingReturn] = useState(false);
   
   // Refs for background logic
   const userId = "user123";
-  const pollCounter = useRef(0);
 
 
   // --- Workforce Allocation State ---
@@ -114,42 +108,7 @@ export default function MonopolyBoss() {
 
 
   // 3. The Single Heartbeat (Visual countdown + Data Polling)
-  useEffect(() => {
-    // Pass 'true' only on the very first load to show the initial loading screen
-    refreshData(true); 
-
-    const heartbeat = setInterval(() => {
-      const now = Math.floor(Date.now() / 1000);
-      let diff = 0;
-
-      // A. Update Countdown
-      if (gameState.nextTick > 0) {
-        diff = gameState.nextTick - now;
-        setSecondsRemaining(diff > 0 ? diff : 0);
-        
-        // --- NEW: TRIGGER ON TICK ---
-        // If the timer hits zero, trigger a refresh immediately!
-        // We add a tiny 500ms buffer to ensure the server has finished its DB write.
-        if (diff <= 0) {
-          setTimeout(() => {
-            refreshData(); 
-            setIsPendingReturn(false);
-          }, 500);
-        }
-      } else {
-        setSecondsRemaining(60);
-      }
-
-      // B. Poll Data every 5 seconds (Safety fallback)
-      pollCounter.current += 1;
-      if (pollCounter.current >= 5) {
-        refreshData();
-        pollCounter.current = 0;
-      }
-    }, 1000);
-
-    return () => clearInterval(heartbeat);
-  }, [refreshData, gameState.nextTick]);
+  
 
   // 4. Trade Execution
   const handleTrade = async (item: string, action: string) => {
@@ -184,11 +143,7 @@ export default function MonopolyBoss() {
     }
     setTradeAmounts(prev => ({ ...prev, [item.name]: amount }));
   };
-
-  // 5. Helper formatters
-  const formatCurrency = (val: number) => 
-    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
-
+  
   const history = gameState.history;
   const prices = history.map(h => h.price);
   
@@ -205,71 +160,6 @@ export default function MonopolyBoss() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200 p-4 font-mono">
-      {/* HEADER */}
-      <header className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 border-b border-slate-800 pb-4">
-        <div>
-          <h1 className="text-xl font-bold text-emerald-500 tracking-tighter italic uppercase">Monopoly Boss</h1>
-          <p className="text-[10px] text-slate-500 uppercase tracking-widest italic">Auth_ID: {userId}</p>
-        </div>
-        
-        <div className="flex flex-col items-center border-x border-slate-800 px-4">
-          <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Liquid Balance</span>
-          <span className="text-2xl font-light text-emerald-400 tabular-nums">
-            {formatCurrency(gameState.user.balance)}
-          </span>
-        </div>
-
-        <div className="flex flex-col items-end justify-center">
-          <div className="flex flex-col items-end justify-center relative w-16 h-16 group">
-            <svg className="w-full h-full transform -rotate-90">
-              {/* Background Circle (The Track) */}
-              <circle
-                cx="32"
-                cy="32"
-                r="28"
-                stroke="currentColor"
-                strokeWidth="2"
-                fill="transparent"
-                className="text-slate-800"
-              />
-              {/* Progress Circle */}
-              <circle
-                cx="32"
-                cy="32"
-                r="28"
-                stroke="currentColor"
-                strokeWidth="3"
-                fill="transparent"
-                strokeDasharray={176} // Circumference (2 * pi * 28)
-                strokeDashoffset={176 - (176 * (tickInterval - secondsRemaining)) / tickInterval}
-                className={`transition-all duration-1000 ease-linear ${
-                  secondsRemaining === 0 
-                    ? "text-white scale-0 rotate-180" // The "Inversion" effect
-                    : "text-emerald-500"
-                }`}
-                style={{ transformOrigin: 'center' }}
-              />
-            </svg>
-
-            {/* Center Content */}
-            <div className="absolute inset-0 flex items-center justify-center">
-              {secondsRemaining === 0 ? (
-                <div className="w-2 h-2 bg-white rounded-full animate-ping" />
-              ) : (
-                <span className="text-[10px] font-bold text-slate-500 tabular-nums">
-                  {secondsRemaining}s
-                </span>
-              )}
-            </div>
-            
-            {/* Subtitle */}
-            <span className="absolute -bottom-4 right-0 text-[8px] uppercase tracking-tighter text-slate-600">
-              Syncing...
-            </span>
-          </div>
-        </div>
-      </header>
-
       <main className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
         {/* LEFT: WORKFORCE COMMAND DIRECTIVE (4 cols) */}
