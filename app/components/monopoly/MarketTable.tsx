@@ -9,6 +9,7 @@ interface MarketTableProps {
   setTradeAmounts: React.Dispatch<React.SetStateAction<Record<string, number>>>;
   handleTrade: (item: string, action: string) => void;
   setMax: (item: any, action: 'buy' | 'sell') => void;
+  currentTax: number;
 }
 
 export const MarketTable = ({
@@ -19,7 +20,8 @@ export const MarketTable = ({
   tradeAmounts,
   setTradeAmounts,
   handleTrade,
-  setMax
+  setMax,
+  currentTax,
 }: MarketTableProps) => {
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-sm overflow-hidden shadow-2xl">
@@ -28,6 +30,7 @@ export const MarketTable = ({
           <tr>
             <th className="p-3">Resource</th>
             <th className="p-3 text-right">Price</th>
+            <th className="p-3 text-right">Tax - {currentTax}%</th>
             <th className="p-3 text-center">Status</th>
             <th className="p-3 text-right">Held</th>
             <th className="p-3 text-center">Execute</th>
@@ -44,6 +47,7 @@ export const MarketTable = ({
             >
               <td className="p-3 font-bold text-slate-300">{item.name}</td>
               <td className="p-3 text-right tabular-nums font-bold text-white">${item.price.toFixed(2)}</td>
+              <td className="p-3 text-right tabular-nums font-bold text-white">${(item.price * (1 - currentTax)).toFixed(2)}</td>
               <td className="p-3 text-center">
                 {(() => {
                   const d = item.demand; const s = item.supply;

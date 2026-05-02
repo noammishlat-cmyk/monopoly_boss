@@ -36,6 +36,7 @@ export default function MonopolyBoss() {
     error,
     clearError,
     maxSabotageRisk,
+    currentTax,
   } = useGameState(UserID);
 
   return (
@@ -77,6 +78,7 @@ export default function MonopolyBoss() {
             setTradeAmounts={setTradeAmounts}
             handleTrade={handleTrade}
             setMax={setMax}
+            currentTax={currentTax}
           />
           
           <TelemetryGraph 

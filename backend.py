@@ -11,14 +11,15 @@ TICK_INTERVAL = 60.0
 MARKET_DECAY_RATE = 0.05 # How fast the market returns to "Normal" (0.1 = 10% of pressure disappears per tick)
 EQUILIBRIUM_LEVEL = 100.0 # The "Neutral" level for Supply and Demand
 HISTORY_RETAIN_TIME = 1800  # 30 minutes in seconds
+CURRENT_TAX = 0.05 # 5%
 
 
 MATERIALS = [
     #  Name   | Price | Change | Supply | Demand | Updated |  Base  | Rarity Index (Higher = Rarer)
-    ('Iron'   , 100.0,   0.0,    100,     100,      0,       100.0,        2),
-    ('Gold'   , 500.0,   0.0,    100,     100,      0,       500.0,        3),
-    ('Oil'    , 300.0,   0.0,    100,     100,      0,       300.0,        4),
-    ('Wood'   , 20.0,    0.0,    100,     100,      0,        20.0,        1),
+    ('Wood'   , 20.0,    0.0,    2000,    2000,     0,        20.0,        1),
+    ('Iron'   , 100.0,   0.0,    1000,    1000,     0,       100.0,        2),
+    ('Gold'   , 500.0,   0.0,    660,     660,      0,       500.0,        3),
+    ('Oil'    , 300.0,   0.0,    500,     500,      0,       300.0,        4),
 ]
 
 app = Flask(__name__)
@@ -28,6 +29,8 @@ CORS(app)
 
 @app.route('/api/get_user/<u_id>')
 def get_game_state(u_id):
+    global CURRENT_TAX
+
     conn = sqlite3.connect('market.db')
     cursor = conn.cursor()
 
@@ -67,61 +70,13 @@ def get_game_state(u_id):
         "deployed_workers": deployed_workers,
         "next_tick": next_tick,
         "server_time": now,
+        "tick_length": TICK_INTERVAL,
+        "current_tax": CURRENT_TAX,
     })
 
 @app.route('/api/state/prices')
 def get_prices():
-    conn = sqlite3.connect('market.db')
-    cursor = conn.cursor()
-    
-    # 1. FETCH MARKET
-    cursor.execute("SELECT name, price, supply, demand, base_price FROM resources")
-    market_rows = cursor.fetchall()
-    market_data = []
-    resource_names = []
-    for row in market_rows:
-        name, price, supply, demand, base_price = row
-        resource_names.append(name)
-        market_data.append({
-            "name": name,
-            "price": round(price, 2),
-            "supply": supply,
-            "demand": demand,
-            "base_price": base_price
-        })
-
-    all_histories = {}
-    
-    for name in resource_names:
-        cursor.execute("""
-            SELECT price, timestamp FROM price_history 
-            WHERE resource_name = ? 
-            ORDER BY timestamp DESC LIMIT 30
-        """, (name,))
-        hist_rows = cursor.fetchall()
-        
-        item_history = []
-        for row in reversed(hist_rows):
-            item_history.append({
-                "time": time.strftime('%H:%M:%S', time.localtime(row[1])),
-                "price": round(row[0], 2)
-            })
-        all_histories[name] = item_history
-
-    # 3. CALCULATE NEXT TICK
-    now = time.time()
-    next_tick = now + (TICK_INTERVAL - (now % TICK_INTERVAL))
-
-    conn.close()
-
-    # THE BIG JSON
-    return jsonify({
-        "market": market_data,
-        "history": all_histories,
-        "next_tick": next_tick,
-        "tick_length": TICK_INTERVAL,
-        "server_time": now
-    })
+    return fetch_market_state()
 
 @app.route('/api/deploy_workers/<u_id>', methods=['POST'])
 def deploy_workers(u_id):
@@ -195,32 +150,54 @@ def buy_resource():
     conn = sqlite3.connect('market.db')
     cursor = conn.cursor()
     try:
-        # 1. Get current price (Supply doesn't limit buying anymore, only price does)
-        cursor.execute("SELECT price FROM resources WHERE name = ?", (item,))
+        # --- PRE-TRANSACTION SNAPSHOT ---
+        cursor.execute("SELECT price, supply, demand FROM resources WHERE name = ?", (item,))
         res = cursor.fetchone()
         if not res: return jsonify({"error": "Item not found"}), 400
         
-        total_cost = res[0] * qty
+        old_price, old_supply, old_demand = res
+        total_cost = old_price * qty
+        
         cursor.execute("SELECT balance FROM users WHERE user_id = ?", (u_id,))
         balance = cursor.fetchone()[0]
 
         if balance < total_cost:
             return jsonify({"error": "Insufficient funds"}), 400
 
-        # 2. TRANSACTION
+        # 1. Update User Balance
         cursor.execute("UPDATE users SET balance = balance - ? WHERE user_id = ?", (total_cost, u_id))
         
-        # INCREASE DEMAND: Buying adds to the Demand pressure
-        cursor.execute("UPDATE resources SET demand = demand + ? WHERE name = ?", (qty, item))
+        # 2. Apply Inverse Reaction
+        cursor.execute("""
+            UPDATE resources 
+            SET demand = demand + ?, 
+                supply = MAX(supply - ?, 1) 
+            WHERE name = ?
+        """, (qty, qty, item))
         
+        # 3. Add to inventory
         cursor.execute("""
             INSERT INTO inventory (user_id, resource_name, amount) VALUES (?, ?, ?)
             ON CONFLICT(user_id, resource_name) DO UPDATE SET amount = amount + ?
         """, (u_id, item, qty, qty))
 
+        # --- POST-TRANSACTION SNAPSHOT ---
+        cursor.execute("SELECT supply, demand FROM resources WHERE name = ?", (item,))
+        new_supply, new_demand = cursor.fetchone()
+
+        print(f"\n[🛒 BUY EVENT] User: {u_id} | Item: {item} | Qty: {qty}")
+        print(f"  💰 Price Per: ${old_price:,.2f} | Total: ${total_cost:,.2f}")
+        print(f"  📉 Supply: {old_supply} -> {new_supply} (Diff: -{qty})")
+        print(f"  📈 Demand: {old_demand} -> {new_demand} (Diff: +{qty})")
+        print("-" * 40)
+
         conn.commit()
-        return jsonify({"message": "Bought items, demand increased"}), 200
-    finally: conn.close()
+        conn.close()
+        return fetch_market_state()
+    except Exception as e:
+        if conn: conn.close()
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route('/api/sell', methods=['POST'])
 def sell_resource():
@@ -232,81 +209,175 @@ def sell_resource():
     conn = sqlite3.connect('market.db')
     cursor = conn.cursor()
     try:
+        # Check Inventory
         cursor.execute("SELECT amount FROM inventory WHERE user_id = ? AND resource_name = ?", (u_id, item))
         row = cursor.fetchone()
         if not row or row[0] < qty:
             return jsonify({"error": "Not enough items"}), 400
 
-        cursor.execute("SELECT price FROM resources WHERE name = ?", (item,))
-        gain = cursor.fetchone()[0] * qty
+        # --- PRE-TRANSACTION SNAPSHOT ---
+        cursor.execute("SELECT price, supply, demand FROM resources WHERE name = ?", (item,))
+        res = cursor.fetchone()
+        current_price, old_supply, old_demand = res
+        
+        # Apply tax
+        tax_rate = CURRENT_TAX
+        gain = (current_price * qty) * (1.0 - tax_rate)
 
-        # TRANSACTION
+        # 1. Update Balance
         cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (gain, u_id))
         
-        # INCREASE SUPPLY: Selling adds to the Supply pressure
-        cursor.execute("UPDATE resources SET supply = supply + ? WHERE name = ?", (qty, item))
+        # 2. Apply Inverse Reaction
+        cursor.execute("""
+            UPDATE resources 
+            SET supply = supply + ?, 
+                demand = MAX(demand - ?, 1) 
+            WHERE name = ?
+        """, (qty, qty, item))
         
+        # 3. Update Inventory
         cursor.execute("UPDATE inventory SET amount = amount - ? WHERE user_id = ? AND resource_name = ?", (qty, u_id, item))
 
+        # --- POST-TRANSACTION SNAPSHOT ---
+        cursor.execute("SELECT supply, demand FROM resources WHERE name = ?", (item,))
+        new_supply, new_demand = cursor.fetchone()
+
+        print(f"\n[💰 SELL EVENT] User: {u_id} | Item: {item} | Qty: {qty}")
+        print(f"  💵 Market Price: ${current_price:,.2f} | Player Gained (Post-Tax): ${gain:,.2f}")
+        print(f"  📈 Supply: {old_supply} -> {new_supply} (Diff: +{qty})")
+        print(f"  📉 Demand: {old_demand} -> {new_demand} (Diff: -{qty})")
+        print("-" * 40)
+
         conn.commit()
-        return jsonify({"message": "Sold items, supply increased"}), 200
-    finally: conn.close()
+        conn.close()
+        return fetch_market_state()
+    except Exception as e:
+        if conn: conn.close()
+        return jsonify({"error": str(e)}), 500
 
 
 # --- MARKET LOGIC ---
 
-def calculate_market_price(current_price, base_price, supply, demand, last_change):
+def fetch_market_state():
+    conn = sqlite3.connect('market.db')
+    cursor = conn.cursor()
+    
+    # 1. FETCH MARKET
+    cursor.execute("SELECT name, price, supply, demand, base_price FROM resources")
+    market_rows = cursor.fetchall()
+    market_data = []
+    resource_names = []
+    for row in market_rows:
+        name, price, supply, demand, base_price = row
+        resource_names.append(name)
+        market_data.append({
+            "name": name,
+            "price": round(price, 2),
+            "supply": supply,
+            "demand": demand,
+            "base_price": base_price
+        })
+
+    all_histories = {}
+    
+    for name in resource_names:
+        cursor.execute("""
+            SELECT price, timestamp FROM price_history 
+            WHERE resource_name = ? 
+            ORDER BY timestamp DESC LIMIT 30
+        """, (name,))
+        hist_rows = cursor.fetchall()
+        
+        item_history = []
+        for row in reversed(hist_rows):
+            item_history.append({
+                "time": time.strftime('%H:%M:%S', time.localtime(row[1])),
+                "price": round(row[0], 2)
+            })
+        all_histories[name] = item_history
+
+    # 3. CALCULATE NEXT TICK
+    now = time.time()
+    next_tick = now + (TICK_INTERVAL - (now % TICK_INTERVAL))
+
+    conn.close()
+
+    return jsonify({
+        "market": market_data,
+        "history": all_histories,
+        "next_tick": next_tick,
+        "tick_length": TICK_INTERVAL,
+        "server_time": now
+    })
+
+def calculate_market_price(current_price, base_price, supply, demand, last_change, rarity_index):
     """
-    Stable Equilibrium Model:
-    The price tries to reach (Base Price * Demand/Supply Ratio).
+    Elastic Equilibrium Model:
+    Scales non-linearly to prevent hyperinflation and uses rarity 
+    to dictate how aggressively the market reacts to shortages.
     """
-    # 1. Determine the "Fair Market Value" (The Target)
-    # If Demand is 2x Supply, target is 2x Base Price.
-    # We use max(supply, 1) to avoid division by zero.
-    ratio = demand / max(supply, 1)
-    target_price = base_price * ratio
+    # 1. Non-linear Target Price (Incorporating Rarity)
+    # Higher rarity makes the price MORE sensitive to shortages (inelastic)
+    # Rarity 1 (Common) -> Elasticity 0.5 (Prices rise slowly during shortages)
+    # Rarity 5 (Legendary) -> Elasticity 1.15 (Prices spike aggressively)
+    elasticity = 0.35 + (rarity_index * 0.15) 
+    
+    ratio = max(demand, 1) / max(supply, 1)
+    
+    # Apply elasticity exponent to prevent absurd linear scaling
+    adjusted_ratio = math.pow(ratio, elasticity) 
+    
+    # Hard cap the multiplier to protect game balance (e.g., max 50x base price)
+    adjusted_ratio = min(adjusted_ratio, 50.0)
+    target_price = base_price * adjusted_ratio
 
     # 2. Calculate the Gap
-    # How far is the current price from where it 'should' be?
-    # If target is $380 and current is $400,000, diff is -$399,620
     diff = target_price - current_price
 
-    # 3. Move toward the target (Reaction Speed)
-    # Move 5% of the way toward the target every tick.
-    # This prevents instant teleports but ensures a correction happens.
-    reaction_speed = 0.05
+    # 3. Dynamic Reaction Speed
+    # React faster when the gap is huge (panic buying/selling)
+    # React slower when the gap is small (soft landing)
+    distance_ratio = abs(diff) / max(current_price, 1)
+    reaction_speed = 0.03 * (1 + distance_ratio) 
+    # Cap reaction speed so it doesn't instantly snap
+    reaction_speed = min(reaction_speed, 0.15)
+    
     movement = diff * reaction_speed
 
-    # 4. Add Jitter (Noise & Momentum)
-    # Keep noise relative to BASE price so it doesn't scale out of control
-    momentum = last_change * 0.1
+    # 4. Dampened Momentum & Noise
+    # Only apply strong momentum if we are far from the target to prevent jitter
+    momentum_dampener = min(abs(diff) / base_price, 1.0)
+    momentum = last_change * 0.1 * momentum_dampener 
+    
+    # Noise scales with base price, so hyper-inflated goods don't swing wildly
     noise = random.uniform(-0.01, 0.01) * base_price
     
     total_change = movement + momentum + noise
 
-    # 5. Volatility Cap
-    # Don't let the price move more than 10% of the CURRENT price in one tick.
-    # This keeps the graph readable even during a crash.
-    max_move = current_price * 0.10
+    # 5. Dynamic Volatility Cap
+    # Rarer items have looser volatility limits (more volatile markets)
+    volatility_limit = 0.08 + (rarity_index * 0.02) 
+    max_move = current_price * volatility_limit
     total_change = max(min(total_change, max_move), -max_move)
 
     new_price = current_price + total_change
 
     # 6. Safety Floor
-    # Price can never go below 10% of its base value.
-    return max(new_price, base_price * 0.1), total_change
+    # Ensure it never drops below 10% of base
+    floor_price = base_price * 0.1
+    return max(new_price, floor_price), total_change
 
 def run_tick():
     conn = sqlite3.connect('market.db')
     cursor = conn.cursor()
     now = time.time()
 
-    cursor.execute("SELECT name, price, last_change, supply, demand, base_price FROM resources")
+    cursor.execute("SELECT name, price, last_change, supply, demand, base_price, rarity_index FROM resources")
     all_resources = cursor.fetchall()
 
-    for name, price, last_change, supply, demand, base_price in all_resources:
+    for name, price, last_change, supply, demand, base_price, rarity_index in all_resources:
         # 1. Calculate New Price
-        new_price, change = calculate_market_price(price, base_price, supply, demand, last_change)
+        new_price, change = calculate_market_price(price, base_price, supply, demand, last_change, rarity_index)
 
         # 2. MARKET DECAY (Equilibrium Logic)
         # Every tick, Supply and Demand move back toward EQUILIBRIUM_LEVEL
@@ -484,16 +555,29 @@ def handle_workers_reward(cursor: sqlite3.Cursor):
 
         if overall_rewards:
             for res_name, amount in overall_rewards.items():
+                # 1. Update Player Inventory (You already have this)
                 cursor.execute("""
                     INSERT INTO inventory (user_id, resource_name, amount) 
                     VALUES (?, ?, ?)
                     ON CONFLICT(user_id, resource_name) 
                     DO UPDATE SET amount = amount + ?
                 """, (u_id, res_name, amount, amount))
+                
+                # 2. UPDATE GLOBAL MARKET SUPPLY
+                # This ensures that as players find more, the global price drops.
+                cursor.execute("""
+                    UPDATE resources 
+                    SET supply = supply + ? 
+                    WHERE name = ?
+                """, (amount, res_name))
+                
+                # Debugging prints
+                print(f"User {u_id} gathered {amount}x {res_name}")
+                print(f"  [🌍 MARKET] Global supply of {res_name} increased by {amount}.")
             
             # Summary print
             summary = ", ".join([f"{amt}x {name}" for name, amt in overall_rewards.items()])
-            print(f"User {u_id} successfully gathered: {summary}")
+            print(f"✅ Total harvest for User {u_id}: {summary}")
         else:
             print(f"User {u_id} mining failed completely")
 
@@ -522,9 +606,17 @@ if __name__ == "__main__":
         workers_espionage INTEGER DEFAULT 0
     """
 
+    INVENTORY_SCHEMA = """
+        user_id TEXT, 
+        resource_name TEXT,
+        amount INTEGER,
+        PRIMARY KEY (user_id, resource_name)
+    """
+
     # Sync them!
     sync_table_schema(conn, "resources", RESOURCES_SCHEMA)
     sync_table_schema(conn, "users", USERS_SCHEMA)
+    sync_table_schema(conn, "inventory", INVENTORY_SCHEMA)
 
     # Standard Price History (doesn't change often, but keep it simple)
     conn.execute("""

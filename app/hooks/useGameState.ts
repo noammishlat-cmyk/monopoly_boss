@@ -45,6 +45,8 @@ export function useGameState(userId: string) {
   const [error, setError] = useState<string | null>(null);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
 
+  const [currentTax, setCurrentTax] = useState(0.05);
+
   useEffect(() => {
     if (error) {
       const timer = setTimeout(() => {
@@ -100,6 +102,8 @@ export function useGameState(userId: string) {
 
       setLastDeployment(workers)
 
+      setCurrentTax(data.current_tax)
+
       setNextTick(data.next_tick)
       setTickInterval(data.tick_length);
     } catch (err) {
@@ -151,6 +155,17 @@ export function useGameState(userId: string) {
       if (response.ok) {
         refreshUserData();
         setTradeAmounts(prev => ({ ...prev, [item]: 0 }));
+
+        const data = await response.json();
+
+        setGameData({
+          market: data.market,
+          history: data.history // This is now the { Gold: [], Iron: [] } object
+        });
+        
+        setNextTick(data.next_tick)
+        setTickInterval(data.tick_length);
+        setError(null);
       } else {
         const err = await response.json();
         setError(err.error);
@@ -264,6 +279,7 @@ export function useGameState(userId: string) {
     lastDeployment,
     formatCurrency,
     maxSabotageRisk,
-    handleWorkersDeploy
+    handleWorkersDeploy,
+    currentTax
   };
 }
