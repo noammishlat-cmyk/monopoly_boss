@@ -14,17 +14,42 @@ type UserData = {
   deployed_workers: WorkerTypes
 };
 
+export interface MarketItem {
+  name: string;
+  price: number;
+  base_price: number;
+  demand: number;
+  supply: number;
+}
+
 type PricePoint = {
   price: number;
   time: string;
 };
 
 type GameData = {
-  market: any[];
+  market: MarketItem[];
   history: Record<string, PricePoint[]>; 
 };
 
+interface LogEntry {
+  text: string;
+  color: string;
+}
+
+interface LeaderboardEntry {
+  rank: number;
+  user_id: string;
+  balance: number;
+  net_worth: number;
+  inventory_value: number;
+  inventory: Record<string, number> | "Hidden";
+}
+
 export function useGameState(userId: string) {
+  const BACKEND_ADRESS = "http://192.168.1.246:5000"
+
+
   // 1. Core State
   const [userData, setUserData] = useState<UserData>({
     balance: 0,
@@ -37,7 +62,8 @@ export function useGameState(userId: string) {
     history: {},
   });
   const [nextTick, setNextTick] = useState(0);
-  const [maxSabotageRisk, setMaxSabotageRisk] = useState(25);
+  const [maxSabotageRisk, setMaxSabotageRisk] = useState(10);
+  const [maxSendSabotageRisk, setMaxSendSabotageRisk] = useState(10);
 
   const [selectedItem, setSelectedItem] = useState("Iron");
   const [secondsRemaining, setSecondsRemaining] = useState(0);
@@ -45,7 +71,12 @@ export function useGameState(userId: string) {
   const [error, setError] = useState<string | null>(null);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
 
+  const [userLog, setUserLog] = useState<LogEntry[]>()
+  const [currentDeploymentTickLength, setCurrentDeploymentTickLength] = useState(1)
+
   const [currentTax, setCurrentTax] = useState(0.05);
+
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>()
 
   useEffect(() => {
     if (error) {
@@ -68,6 +99,7 @@ export function useGameState(userId: string) {
     rnd: 0,
     espionage: 0
   });
+
   const [lastDeployment, setLastDeployment] = useState<typeof allocation | null>(null);
   const [isPendingReturn, setIsPendingReturn] = useState(true);
 
@@ -83,7 +115,7 @@ export function useGameState(userId: string) {
   const refreshUserData = useCallback(async (isInitial = false) => {
     try {
       if (isInitial) setIsHistoryLoading(true);
-      const url = `http://localhost:5000/api/get_user/${userId}`;
+      const url = `${BACKEND_ADRESS}/api/get_user/${userId}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error();
       const data = await res.json();
@@ -97,12 +129,18 @@ export function useGameState(userId: string) {
 
       const workers = data.deployed_workers
       const totalSent = (workers.extraction || 0) + (workers.rnd || 0) + (workers.espionage || 0);
-      console.log(totalSent)
       setIsPendingReturn(totalSent > 0);
 
       setLastDeployment(workers)
 
       setCurrentTax(data.current_tax)
+
+      setMaxSabotageRisk(data.max_sabotage_precent)
+      setMaxSendSabotageRisk(data.max_sabotage_send)
+
+      setUserLog(data.user_logs)
+
+      setCurrentDeploymentTickLength(data.current_deployment_length)
 
       setNextTick(data.next_tick)
       setTickInterval(data.tick_length);
@@ -118,7 +156,7 @@ export function useGameState(userId: string) {
       if (isInitial) setIsHistoryLoading(true);
       
       // Note: Removed the extra '}' from the end of your URL string
-      const url = `http://localhost:5000/api/state/prices`; 
+      const url = `${BACKEND_ADRESS}/api/state/prices`; 
       const res = await fetch(url);
       if (!res.ok) throw new Error("Fetch failed");
       
@@ -146,7 +184,7 @@ export function useGameState(userId: string) {
     if (amount <= 0) return;
 
     try {
-      const response = await fetch(`http://127.0.0.1:5000/api/${action}`, {
+      const response = await fetch(`${BACKEND_ADRESS}/api/${action}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: userId, item: item, amount: amount }),
@@ -171,13 +209,13 @@ export function useGameState(userId: string) {
         setError(err.error);
       }
     } catch (e) {
-      alert("Trade server unreachable");
+      alert(`Trade server unreachable - ${e}`);
     }
   };
 
   const handleWorkersDeploy = async(userId: string, sentWorkers: WorkerTypes) => {
     try {
-      const response = await fetch(`http://127.0.0.1:5000/api/deploy_workers/${userId}`, {
+      const response = await fetch(`${BACKEND_ADRESS}/api/deploy_workers/${userId}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -188,13 +226,13 @@ export function useGameState(userId: string) {
           })
         });
       if (response.ok) {
-        // LOGIC FOR HANDELING WORKERS IN BACKEND
+        refreshUserData()
       } else {
         const err = await response.json();
         setError(err.error);
       }
     } catch (e) {
-      alert("Trade server unreachable");
+      alert(`Trade server unreachable - ${e}`);
     }
   }
 
@@ -224,13 +262,16 @@ export function useGameState(userId: string) {
     setLastDeployment({ ...allocation });
     handleWorkersDeploy(userId, {extraction, rnd, espionage})
     setIsPendingReturn(true);
-    // Add your API deployment call here if needed[cite: 1]
+    setAllocation({ extraction: 0, rnd: 0, espionage: 0 });
   };
 
   // The Heartbeat (Countdown & Polling)[cite: 1]
   useEffect(() => {
-    refreshUserData(true); 
-    refreshPricingData(true);
+    Promise.resolve().then(() => {
+      refreshUserData(true);
+      refreshPricingData(true);
+    });
+
     const heartbeat = setInterval(() => {
       const now = Math.floor(Date.now() / 1000);
       if (nextTick > 0) {
@@ -241,7 +282,7 @@ export function useGameState(userId: string) {
             refreshUserData(); 
             refreshPricingData();
             setIsPendingReturn(false);
-          }, 500);
+          }, 1500);
         }
       }
       pollCounter.current += 1;
@@ -251,7 +292,7 @@ export function useGameState(userId: string) {
       }
     }, 1000);
     return () => clearInterval(heartbeat);
-  }, [refreshUserData, nextTick]);
+  }, [refreshUserData, nextTick, refreshPricingData]);
 
   // Helper[cite: 1]
   const formatCurrency = (val: number) => 
@@ -279,7 +320,11 @@ export function useGameState(userId: string) {
     lastDeployment,
     formatCurrency,
     maxSabotageRisk,
+    maxSendSabotageRisk,
     handleWorkersDeploy,
-    currentTax
+    currentTax,
+    userLog,
+    currentDeploymentTickLength,
+    leaderboard
   };
 }

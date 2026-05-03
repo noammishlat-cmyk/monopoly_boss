@@ -2,7 +2,7 @@ import React, {useState} from 'react';
 import { Users, Pickaxe, Cpu, Crosshair, Info } from 'lucide-react';
 import { DeptInfo } from './DeptInfoHelper';
 
-type WorkerTpes = {
+type WorkerTypes = {
   extraction: number;
   rnd: number;
   espionage: number
@@ -12,11 +12,13 @@ interface WorkforceCommandProps {
   isPendingReturn: boolean;
   availableUnits: number;
   maxWorkforce: number;
-  allocation: WorkerTpes;
+  allocation: WorkerTypes;
   onAllocationChange: (dept: string, value: number) => void;
   onDeploy: (extraction: number, rnd: number, espionage: number) => void;
-  lastDeployment: WorkerTpes;
+  lastDeployment: WorkerTypes | null;
   secondsRemaining: number;
+  deploymentTickLength: number;
+  maxSendSabotage: number;
   maxSabotageRisk: number;
 }
 
@@ -29,6 +31,8 @@ export const WorkforceCommand = ({
   onDeploy,
   lastDeployment,
   secondsRemaining,
+  deploymentTickLength,
+  maxSendSabotage,
   maxSabotageRisk,
 }: WorkforceCommandProps) => {
 
@@ -38,7 +42,7 @@ export const WorkforceCommand = ({
     
     rnd: "Strategic Analytics & Scaling posibilities :\n• RECRUITMENT: Increases maximum available workforce units.\n• SYNERGY: Boosts the probability of finding high-value/rare elements when deployed with Extraction units.\nIf there are less extractors than r&d they will only search for recruits.",
     
-    espionage: "Hostile Disruption Operations.\nAuthorize units to infiltrate rivals to steal materials or neutralize personnel.\n\n⚠️ RISK: Detection may lead to permanent loss of deployed workforce units.\nSuccess probability scales with allocation."
+    espionage: "Hostile Disruption Operations.\nAuthorize units to infiltrate rivals to steal materials, money or neutralize personnel.\n\n⚠️ RISK: Detection may lead to permanent loss of deployed workforce units.\nSuccess probability scales with allocation."
   };
 
   if (isPendingReturn) {
@@ -72,7 +76,7 @@ export const WorkforceCommand = ({
         <div className="p-3 bg-black border border-slate-800 inline-block w-full">
             <span className="text-[9px] text-slate-500 uppercase block mb-1">Estimated Return In</span>
             <span className="text-xl font-light text-white tabular-nums tracking-widest">
-              {secondsRemaining}s
+              {secondsRemaining + (60 * deploymentTickLength) - 60}s
             </span>
         </div>
         
@@ -91,7 +95,7 @@ export const WorkforceCommand = ({
   };
 
   const getRiskStatus = (allocation: number) => {
-    const percent = (allocation / maxSabotageRisk) * 100;
+    const percent = (allocation / (maxSendSabotage)) * 100;
     
     if (percent === 0) return { label: "NOT_ACTIVE", color: "text-emerald-500", bar: "bg-emerald-500", level: "SAFE" };;
     if (percent <= 15) return { label: "LOW_TRACE", color: "text-emerald-500", bar: "bg-emerald-500", level: "SAFE" };
@@ -101,8 +105,8 @@ export const WorkforceCommand = ({
   };
 
   const getRiskPresentage = (allocation: number) => {
-    let amount = Math.floor((allocation / maxSabotageRisk) * 70);
-    amount = Math.min(amount, 70)
+    let amount = Math.floor((allocation / maxSendSabotage) * maxSabotageRisk);
+    amount = Math.min(amount, maxSabotageRisk)
     return amount
   }
 
@@ -161,7 +165,7 @@ export const WorkforceCommand = ({
                       <div 
                         key={i}
                         className={`h-full flex-1 transition-all duration-300 ${
-                          (i * 10) < (allocation.espionage / maxSabotageRisk * 100) 
+                          (i * 10) < (allocation.espionage / maxSendSabotage * 100) 
                             ? risk.bar 
                             : 'bg-slate-800'
                         }`}
