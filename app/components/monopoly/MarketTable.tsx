@@ -1,14 +1,22 @@
 import React from 'react';
 
+type  MarketItem = {
+  name: string;
+  price: number;
+  base_price: number;
+  demand: number;
+  supply: number;
+}
+
 interface MarketTableProps {
-  market: any[];
+  market: MarketItem[];
   selectedItem: string;
   onSelect: (name: string) => void;
   inventory: Record<string, number>;
   tradeAmounts: Record<string, number>;
   setTradeAmounts: React.Dispatch<React.SetStateAction<Record<string, number>>>;
   handleTrade: (item: string, action: string) => void;
-  setMax: (item: any, action: 'buy' | 'sell') => void;
+  setMax: (item: {name: string, price: number}, action: 'buy' | 'sell') => void;
   currentTax: number;
 }
 

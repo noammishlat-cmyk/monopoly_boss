@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 
+import { FormattedValue } from './FormattedValue';
+
 export interface VoteChoice {
   id: string;
   label: string;
@@ -12,7 +14,6 @@ interface VotingPanelProps {
   secondsRemaining: number;
   playerBalance: number;
   onCastVote: (choiceId: string, amount: number) => void;
-  formatCurrency: (val: number) => string;
 }
 
 export const VotingPanel = ({
@@ -21,7 +22,6 @@ export const VotingPanel = ({
   secondsRemaining,
   playerBalance,
   onCastVote,
-  formatCurrency,
 }: VotingPanelProps) => {
   const [voteAmounts, setVoteAmounts] = useState<Record<string, number>>({});
   const totalVotes = choices.reduce((acc, curr) => acc + curr.votes, 0);
@@ -50,8 +50,8 @@ export const VotingPanel = ({
           <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
           <span className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">Gov_Protocol.exe</span>
         </div>
-        <span className={`text-[10px] font-bold tabular-nums ${secondsRemaining <= 10 ? 'text-red-500' : 'text-amber-500'}`}>
-          T-MINUS: {secondsRemaining}S
+        <span className={`text-[10px] font-bold tabular-nums text-center ${secondsRemaining <= 10 ? 'text-red-500' : 'text-amber-500'}`}>
+          Vote advances in: {<FormattedValue value={secondsRemaining} type="time" />}
         </span>
       </div>
 
@@ -129,7 +129,9 @@ export const VotingPanel = ({
 
               <div className="flex justify-between mt-1.5 px-0.5">
                 <span className="text-[7px] text-slate-600 uppercase">Current Pool</span>
-                <span className="text-[8px] text-slate-400 font-bold">{formatCurrency(choice.votes)}</span>
+                <span className="text-[8px] text-slate-400 font-bold">
+                  <FormattedValue value={choice.votes} type="currency" prefix="$" />
+                </span>
               </div>
             </div>
           );
@@ -139,7 +141,7 @@ export const VotingPanel = ({
       {/* 4. FOOTER STATUS */}
       <div className="p-2 bg-slate-950/80 border-t border-slate-800 flex justify-between items-center">
         <span className="text-[8px] text-slate-500 uppercase tracking-widest font-bold">Capital Reserve:</span>
-        <span className="text-[10px] text-emerald-400 font-black tabular-nums">{formatCurrency(playerBalance)}</span>
+        <span className="text-[10px] text-emerald-400 font-black tabular-nums">{<FormattedValue value={playerBalance} type="currency" prefix="$" />}</span>
       </div>
     </div>
   );

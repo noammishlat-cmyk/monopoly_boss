@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { LeaderboardModal } from './LeaderboardModal';
+import { FormattedValue } from './FormattedValue';
 
 interface LeaderboardEntry {
   rank: number;
@@ -19,8 +20,8 @@ interface HeaderProps {
   totalAssets: number;
   tickInterval: number;
   secondsRemaining: number;
-  leaderboard: LeaderboardEntry[]
-  formatCurrency: (val: number) => string;
+  leaderboard: LeaderboardEntry[] | undefined
+  loadLeaderboard: () => void;
 }
 
 export default function Header({ 
@@ -30,7 +31,7 @@ export default function Header({
   tickInterval, 
   secondsRemaining, 
   leaderboard,
-  formatCurrency 
+  loadLeaderboard
 }: HeaderProps) {
   
   // Track if we are currently "filling" the circle or "eating" it
@@ -76,7 +77,7 @@ export default function Header({
             Liquid Cash
           </span>
           <span className="text-xl font-light text-emerald-400 tabular-nums">
-            {formatCurrency(balance)}
+            <FormattedValue value={balance} type="currency" prefix="$" />
           </span>
         </div>
 
@@ -88,7 +89,7 @@ export default function Header({
             Total Net Worth
           </span>
           <span className="text-xl font-light text-blue-400 tabular-nums">
-            {formatCurrency(totalAssets)}
+            <FormattedValue value={totalAssets} type="currency" prefix="$" />
           </span>
         </div>
       </div>
@@ -99,7 +100,7 @@ export default function Header({
         {/* NEW: Leaderboard Trigger (Now a Circle) */}
         <div className="relative group">
           <button 
-            onClick={() => setIsLeaderboardOpen(true)}
+            onClick={() => {loadLeaderboard(); setIsLeaderboardOpen(true);}}
             className="w-12 h-12 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center transition-all hover:border-emerald-500 hover:shadow-[0_0_15px_rgba(16,185,129,0.2)] active:scale-95"
           >
             <span className="text-[8px] font-black text-slate-500 group-hover:text-emerald-400 text-center leading-none uppercase tracking-tighter">
@@ -174,7 +175,7 @@ export default function Header({
           isOpen={isLeaderboardOpen}
           onClose={() => setIsLeaderboardOpen(false)}
           data={leaderboardData}
-          formatCurrency={formatCurrency}
+          updateLeaderboard={loadLeaderboard}
         />
       </div>
     </header>

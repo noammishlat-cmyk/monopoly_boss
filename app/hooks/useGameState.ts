@@ -46,9 +46,10 @@ interface LeaderboardEntry {
   inventory: Record<string, number> | "Hidden";
 }
 
-export function useGameState(userId: string) {
+export function useGameState() {
   const BACKEND_ADRESS = "http://192.168.1.246:5000"
 
+  const [userId, setUserId] = useState("user123");
 
   // 1. Core State
   const [userData, setUserData] = useState<UserData>({
@@ -66,10 +67,14 @@ export function useGameState(userId: string) {
   const [maxSendSabotageRisk, setMaxSendSabotageRisk] = useState(10);
 
   const [selectedItem, setSelectedItem] = useState("Iron");
-  const [secondsRemaining, setSecondsRemaining] = useState(0);
+  const [tickSecondsRemaining, setTickSecondsRemaining] = useState(0);
+  const [voteSecondsRemaining, setVoteSecondsRemaining] = useState(0);
+  const [nextCoorprateVote, setNextCoorprateVote] = useState(0);
   const [tickInterval, setTickInterval] = useState(60);
   const [error, setError] = useState<string | null>(null);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+
+  const [selectedTarget, setSelectedTarget] = useState<string | null>('RANDOM');
 
   const [userLog, setUserLog] = useState<LogEntry[]>()
   const [currentDeploymentTickLength, setCurrentDeploymentTickLength] = useState(1)
@@ -142,6 +147,8 @@ export function useGameState(userId: string) {
 
       setCurrentDeploymentTickLength(data.current_deployment_length)
 
+      setNextCoorprateVote(data.next_vote_tick)
+
       setNextTick(data.next_tick)
       setTickInterval(data.tick_length);
     } catch (err) {
@@ -177,6 +184,32 @@ export function useGameState(userId: string) {
       setIsHistoryLoading(false);
     }
   }, []);
+
+  const fetchLeaderboard = useCallback(async () => {
+    try {
+      const url = `${BACKEND_ADRESS}/api/leaderboard`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+
+      // 1. Update the leaderboard state with the array from the response
+      if (data.leaderboard) {
+        setLeaderboard(data.leaderboard);
+      }
+
+    } catch (err) {
+      setError("Sync Error");
+    } finally {
+      setIsHistoryLoading(false);
+    }
+  }, []);
+
+  useEffect(() =>{
+    const loadLeaderboard = async () => {
+      await fetchLeaderboard();
+    };
+    loadLeaderboard();
+  }, [fetchLeaderboard])
 
   // Trading Logic[cite: 1]
   const handleTrade = async (item: string, action: string) => {
@@ -223,6 +256,7 @@ export function useGameState(userId: string) {
             extraction: sentWorkers.extraction,
             rnd: sentWorkers.rnd,
             espionage: sentWorkers.espionage,
+            target: selectedTarget
           })
         });
       if (response.ok) {
@@ -275,9 +309,11 @@ export function useGameState(userId: string) {
     const heartbeat = setInterval(() => {
       const now = Math.floor(Date.now() / 1000);
       if (nextTick > 0) {
-        const diff = nextTick - now;
-        setSecondsRemaining(diff > 0 ? diff : 0);
-        if (diff <= 0) {
+        const diff_tick = nextTick - now;
+        setTickSecondsRemaining(diff_tick > 0 ? diff_tick : 0);
+        const diff_vote = nextCoorprateVote - now;
+        setVoteSecondsRemaining(diff_vote > 0 ? diff_vote : 0);
+        if (diff_tick <= 0) {
           setTimeout(() => {
             refreshUserData(); 
             refreshPricingData();
@@ -294,16 +330,15 @@ export function useGameState(userId: string) {
     return () => clearInterval(heartbeat);
   }, [refreshUserData, nextTick, refreshPricingData]);
 
-  // Helper[cite: 1]
-  const formatCurrency = (val: number) => 
-    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
+  //  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
 
   return {
     userData,
     gameData,
     selectedItem,
     setSelectedItem,
-    secondsRemaining,
+    tickSecondsRemaining,
+    voteSecondsRemaining,
     tickInterval,
     error,
     clearError,
@@ -318,13 +353,18 @@ export function useGameState(userId: string) {
     deployWorkforce,
     isPendingReturn,
     lastDeployment,
-    formatCurrency,
     maxSabotageRisk,
     maxSendSabotageRisk,
     handleWorkersDeploy,
     currentTax,
     userLog,
     currentDeploymentTickLength,
-    leaderboard
+    leaderboard,
+    fetchLeaderboard,
+    userId,
+    setUserId,
+    nextCoorprateVote,
+    selectedTarget,
+    setSelectedTarget
   };
 }

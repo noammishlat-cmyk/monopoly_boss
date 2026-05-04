@@ -3,14 +3,73 @@ import React, { useMemo } from 'react';
 import { Activity, BarChart3 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine } from 'recharts';
 
-interface TelemetryGraphProps {
-  history: any[];
-  selectedItem: string;
-  isLoading: boolean;
+export type PricePoint = {
+  price: number;
+  time: string;
+};
+
+interface CustomTooltipProps {
+  active?: boolean;
+  payload?: Array<{
+    value: number;
+    payload: PricePoint;
+  }>;
+  label?: string | number;
+  currentTax: number;
+  basePrice: number;
 }
 
-export const TelemetryGraph = ({ history, selectedItem, isLoading }: TelemetryGraphProps) => {
-  const firstPrice = history.length > 0 ? history[0].price : 0;
+const CustomTooltip = ({ active, payload, label, currentTax, basePrice }: CustomTooltipProps) => {
+  if (active && payload && payload.length) {
+    const rawPrice = payload[0].value;
+    const sellPrice = rawPrice * (1 - currentTax);
+    const diffFromBase = rawPrice - basePrice;
+    const diffPercent = ((diffFromBase / basePrice) * 100).toFixed(1);
+    const isAbove = diffFromBase >= 0;
+
+    return (
+      <div className="bg-slate-950 border border-slate-800 p-2 font-mono shadow-2xl">
+        <p className="text-[10px] text-slate-500 mb-1 tracking-widest">{label}</p>
+        <div className="space-y-1">
+          <div className="flex justify-between gap-4">
+            <span className="text-[9px] text-emerald-500 uppercase font-bold">Buy Price:</span>
+            <span className="text-[10px] text-slate-100 font-bold">${rawPrice.toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between gap-4">
+            <span className="text-[9px] text-blue-400 uppercase font-bold">Sell Price:</span>
+            <span className="text-[10px] text-slate-100 font-bold">${sellPrice.toFixed(2)}</span>
+          </div>
+          {/* NEW: Base price row */}
+          <div className="flex justify-between gap-4 border-t border-slate-800 pt-1 mt-1">
+            <span className="text-[9px] text-slate-400 uppercase font-bold">Base Price:</span>
+            <span className="text-[10px] text-slate-300">${basePrice.toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between gap-4">
+            <span className="text-[9px] text-slate-400 uppercase font-bold">Vs Base:</span>
+            <span className={`text-[10px] font-bold ${isAbove ? 'text-emerald-400' : 'text-red-400'}`}>
+              {isAbove ? '+' : ''}{diffPercent}%
+            </span>
+          </div>
+          <div className="text-[8px] text-slate-600 border-t border-slate-800 pt-1 mt-1 uppercase italic">
+            Incl. {(currentTax).toFixed(2)}% Corp Tax
+          </div>
+        </div>
+      </div>
+    );
+  }
+  return null;
+};
+
+interface TelemetryGraphProps {
+  history: PricePoint[];
+  selectedItem: string;
+  isLoading: boolean;
+  currentTax: number;
+  basePrice: number;
+}
+
+export const TelemetryGraph = ({ history, selectedItem, isLoading, currentTax, basePrice }: TelemetryGraphProps) => {
+  const firstPrice = history.length > 0 ? history[0].price : 0.00;
 
   const gradientStops = useMemo(() => {
     if (history.length < 2) return null;
@@ -70,7 +129,11 @@ export const TelemetryGraph = ({ history, selectedItem, isLoading }: TelemetryGr
               <XAxis dataKey="time" hide />
               <YAxis hide domain={['auto', 'auto']} />
               <ReferenceLine y={firstPrice} stroke="#475569" strokeDasharray="3 3" />
-              <Tooltip contentStyle={{ backgroundColor: '#020617', border: '1px solid #1e293b', fontSize: '10px' }} />
+              <Tooltip 
+                content={<CustomTooltip currentTax={currentTax} basePrice={basePrice} />}
+                cursor={{ stroke: '#1e293b', strokeWidth: 1 }}
+                isAnimationActive={false}
+              />
               
               <Line 
                 type="monotone" 

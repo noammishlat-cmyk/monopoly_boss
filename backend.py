@@ -8,52 +8,78 @@ from flask_cors import CORS
 from datetime import datetime
 
 # --- CONFIGURATION ---
-TICK_INTERVAL = 60.0 
-MARKET_DECAY_RATE = 0.05 # How fast the market returns to "Normal" (0.1 = 10% of pressure disappears per tick)
-EQUILIBRIUM_LEVEL = 200.0 # The "Neutral" level for Supply and Demand
+TICK_INTERVAL = 60.0
+VOTE_INTERVAL = 3600.0
+
+MARKET_DECAY_RATE = 0.05
 HISTORY_RETAIN_TIME = 1800  # 30 minutes in seconds
-CURRENT_TAX = 0.05 # 5%
-RECRUITING_CHANCE = 15 # 15%
+CURRENT_TAX = 0.05          # 5%
+RECRUITING_CHANCE = 15      # 15%
 SABOTAGE_MAX_DETECTION_PRECENT = 40
 SABOTAGE_MAX_DETECTION_SEND = 10
-SABOTAGE_CHANCE_OF_DEATH = 20 # Minimum chance for dying during sabotage
-WORKFORCE_RETURN_TIME = 1 # In Ticks
+SABOTAGE_CHANCE_OF_DEATH = 20
+WORKFORCE_RETURN_TIME = 1   # In Ticks
 SHOW_INVENTORY_IN_LEADERBOARD = 1
+COORPRATE_VOTE_LENGTH = 30
+
+# --- FIX 1: Per-rarity equilibrium levels ---
+# Instead of one global EQUILIBRIUM_LEVEL = 200 for all resources,
+# each rarity tier has its own natural resting supply/demand.
+# This prevents Diamond (1000 units) from being pulled toward the same
+# equilibrium as Wood (90000 units), which would make all markets feel the same.
+EQUILIBRIUM_BY_RARITY = {
+    1: 60000,   # Common    (Wood)
+    2: 30000,   # Uncommon  (Iron, Copper)
+    3: 12000,   # Rare      (Gold)
+    4: 5000,    # Epic      (Oil, Lithium, Silicon)
+    5: 800,     # Legendary (Diamond)
+}
+
+# --- FIX 2: Momentum window length ---
+# Price momentum now looks at the last N ticks instead of just 1.
+# This smooths out chart lines and makes trends more readable.
+MOMENTUM_WINDOW = 5
 
 
 CORPORATE_CHANGES_OPTIONS = [
     "Corporate Tax Policy + 0.05% to tax during selling. (Capped at 3%)",
     "Corporate Tax Policy - 0.05% to tax during selling. (Capped at 0.03%)",
     "Corporate Tax Policy + 0.07% to tax during selling. (Capped at 3%)",
-    "Corporate Tax Policy -  0.07% to tax during selling. (Capped at 0.03%)",
+    "Corporate Tax Policy - 0.07% to tax during selling. (Capped at 0.03%)",
     "Corporate Tax Policy + 0.02% to tax during selling. (Capped at 3%)",
     "Corporate Tax Policy - 0.02% to tax during selling. (Capped at 0.03%)",
 
-    "Recruiting Overahall - Uneployment - Increase chance for recruiting.", # RECRUITING_CHANCE
-    "Recruiting Overahall - Tough Market - Decrease chance for recruiting.", # RECRUITING_CHANCE
+    "Recruiting Overhaul - Unemployment - Increase chance for recruiting.",
+    "Recruiting Overhaul - Tough Market - Decrease chance for recruiting.",
 
-    "Global Security Crisis - Increase success chance for sabotage.", # Either SABOTAGE_MAX_DETECTION_PRECENT or SABOTAGE_MAX_DETECTION_SEND
-    "Global Security Upgrades - Decrease success chance for sabotage.", # Either SABOTAGE_MAX_DETECTION_PRECENT or SABOTAGE_MAX_DETECTION_SEND
-    "Global Security Crisis - Decrease chance of death during sabotage.", # SABOTAGE_CHANCE_OF_DEATH
-    "Global Security Upgrades - Increase chance of death during sabotage.", # SABOTAGE_CHANCE_OF_DEATH
+    "Global Security Crisis - Increase success chance for sabotage.",
+    "Global Security Upgrades - Decrease success chance for sabotage.",
+    "Global Security Crisis - Decrease chance of death during sabotage.",
+    "Global Security Upgrades - Increase chance of death during sabotage.",
 
-    "Area Contaminated - Global return time for workers has increased.", # WORKFORCE_RETURN_TIME
-    "New Area Found - Global return time for workers has decreased.", # WORKFORCE_RETURN_TIME
+    "Area Contaminated - Global return time for workers has increased.",
+    "New Area Found - Global return time for workers has decreased.",
 
-    "Value Crisis - Element $element_name has increased in value.", # update_resource_base_price()
-    "Value Overhall - Element $element_name has decreased in value.", # update_resource_base_price()
+    "Value Crisis - Element $element_name has increased in value.",
+    "Value Overhaul - Element $element_name has decreased in value.",
 
-    "Value Crisis - Element $element_name has increased in demand.", # update_resource_base_price()
-    "Value Overhall - Element $element_name has decreased in demand.", # update_resource_base_price()
+    "Value Crisis - Element $element_name has increased in demand.",
+    "Value Overhaul - Element $element_name has decreased in demand.",
+
+    "Public Report - See the resources of top 10 players in leaderboard",
 ]
 
 
 MATERIALS = [
-    #  Name   | Price | Change | Supply | Demand | Updated |  Base  | Rarity Index (Higher = Rarer)
-    ('Wood'   , 20.0,    0.0,    2000,    2000,     0,        20.0,        1),
-    ('Iron'   , 100.0,   0.0,    1000,    1000,     0,       100.0,        2),
-    ('Gold'   , 500.0,   0.0,    660,     660,      0,       500.0,        3),
-    ('Oil'    , 300.0,   0.0,    500,     500,      0,       300.0,        4),
+    #  Name    | Price | Change | Supply | Demand | Updated |  Base   | Rarity Index
+    ('Wood'    , 20.0,    0.0,    90000,   90000,      0,        20.0,        1),
+    ('Iron'    , 100.0,   0.0,    70000,   70000,      0,       100.0,        2),
+    ('Copper'  , 300.0,   0.0,    70000,   70000,      0,       300.0,        2),
+    ('Gold'    , 500.0,   0.0,    50000,   50000,      0,       500.0,        3),
+    ('Oil'     , 700.0,   0.0,    20000,   20000,      0,       700.0,        4),
+    ('Lithium' , 1200.0,  0.0,    18000,   18000,      0,      1200.0,        4),
+    ('Silicon' , 2500.0,  0.0,    12000,    12000,      0,      2500.0,        4),
+    ('Diamond' , 20000.0, 0.0,     1000,    1000,      0,     20000.0,        5),
 ]
 
 app = Flask(__name__)
@@ -63,42 +89,36 @@ CORS(app)
 
 @app.route('/api/get_user/<u_id>')
 def get_game_state(u_id):
-    global CURRENT_TAX
-    global SABOTAGE_MAX_DETECTION_PRECENT
-    global SABOTAGE_MAX_DETECTION_SEND
-    global WORKFORCE_RETURN_TIME
+    global CURRENT_TAX, SABOTAGE_MAX_DETECTION_PRECENT, SABOTAGE_MAX_DETECTION_SEND, WORKFORCE_RETURN_TIME
 
     conn = sqlite3.connect('market.db')
     cursor = conn.cursor()
 
-    # 1. FETCH USER DATA (Including Workforce)
     cursor.execute("""
         SELECT balance, max_workforce, workers_extraction, workers_rnd, workers_espionage, workforce_deployment_length
         FROM users WHERE user_id = ?
     """, (u_id,))
-    
     user_res = cursor.fetchone()
-    
+
+    cursor.execute("SELECT current_vote_length FROM system")
+    row = cursor.fetchone()
+    current_coorprate_vote = row[0] if row else 30
+
     if user_res:
         balance, max_total, w_ext, w_rnd, w_esp, workforce_deployment_length = user_res
     else:
-        # Default fallback if user doesn't exist
         balance, max_total, w_ext, w_rnd, w_esp, workforce_deployment_length = 0, 0, 0, 0, 0, 0
 
-    # 2. FETCH INVENTORY
     cursor.execute("SELECT resource_name, amount FROM inventory WHERE user_id = ?", (u_id,))
-    inv_rows = cursor.fetchall()
-    inventory = {row[0]: row[1] for row in inv_rows}
+    inventory = {row[0]: row[1] for row in cursor.fetchall()}
 
-    # 3. FORMAT THE WORKFORCE DATA
-    deployed_workers = {
-        "extraction": w_ext,
-        "rnd": w_rnd,
-        "espionage": w_esp
-    }
+    deployed_workers = {"extraction": w_ext, "rnd": w_rnd, "espionage": w_esp}
 
     now = time.time()
     next_tick = now + (TICK_INTERVAL - (now % TICK_INTERVAL))
+    next_vote = now + (VOTE_INTERVAL - (now % VOTE_INTERVAL))
+
+    conn.close()
 
     return jsonify({
         "balance": round(balance, 2),
@@ -113,8 +133,10 @@ def get_game_state(u_id):
         "max_sabotage_precent": SABOTAGE_MAX_DETECTION_PRECENT,
         "user_logs": get_user_logs(u_id),
         "workforce_deployment_length": WORKFORCE_RETURN_TIME,
-        "current_deployment_length": workforce_deployment_length
+        "current_deployment_length": workforce_deployment_length,
+        "next_vote_tick": next_vote,
     })
+
 
 @app.route('/api/leaderboard')
 def get_leaderboard():
@@ -124,54 +146,42 @@ def get_leaderboard():
     cursor = conn.cursor()
 
     try:
-        # 1. Get current market prices
         cursor.execute("SELECT name, price FROM resources")
         prices = {row[0]: row[1] for row in cursor.fetchall()}
 
-        # 2. Get users and inventories
         cursor.execute("SELECT user_id, balance FROM users")
         users = cursor.fetchall()
         cursor.execute("SELECT user_id, resource_name, amount FROM inventory")
         inventory_rows = cursor.fetchall()
 
-        # Group inventory by user
         inventories = {}
         for u_id, res_name, amount in inventory_rows:
-            if u_id not in inventories: inventories[u_id] = {}
+            if u_id not in inventories:
+                inventories[u_id] = {}
             inventories[u_id][res_name] = amount
 
-        # 3. Build RAW leaderboard (with all data)
         leaderboard = []
         for u_id, balance in users:
             user_inv = inventories.get(u_id, {})
-            
-            # Calculate real value
             inv_value = sum(prices.get(res, 0) * amt for res, amt in user_inv.items())
             net_worth = balance + inv_value
-
             leaderboard.append({
                 "user_id": u_id,
                 "balance": round(balance, 2),
                 "inventory_value": round(inv_value, 2),
                 "net_worth": round(net_worth, 2),
-                "raw_inventory": user_inv # Keep this temporary for now
+                "raw_inventory": user_inv
             })
 
-        # 4. SORT FIRST to determine Rank
         leaderboard.sort(key=lambda x: x["net_worth"], reverse=True)
 
-        # 5. MASK inventory based on Rank
         for i, entry in enumerate(leaderboard):
             rank = i + 1
             entry["rank"] = rank
-            
-            # Logic: If rank is within the limit, show it; otherwise, hide it
             if rank <= SHOW_INVENTORY_IN_LEADERBOARD:
                 entry["inventory"] = {res: amt for res, amt in entry["raw_inventory"].items() if amt > 0}
             else:
                 entry["inventory"] = "Hidden"
-            
-            # Remove the raw helper data before sending to frontend
             del entry["raw_inventory"]
 
         return jsonify({"leaderboard": leaderboard}), 200
@@ -181,9 +191,11 @@ def get_leaderboard():
     finally:
         conn.close()
 
+
 @app.route('/api/state/prices')
 def get_prices():
     return fetch_market_state()
+
 
 @app.route('/api/deploy_workers/<u_id>', methods=['POST'])
 def deploy_workers(u_id):
@@ -193,16 +205,13 @@ def deploy_workers(u_id):
     u_id = data.get('user_id', '')
 
     if u_id == '':
-        return jsonify({
-                "error": "user_id does not exist",
-            }), 400
+        return jsonify({"error": "user_id does not exist"}), 400
 
-    # Get values from the request, default to 0 if missing
-    # We use abs(int()) to ensure we don't get decimals or negative numbers
     try:
         ext = abs(int(data.get('extraction', 0)))
         rnd = abs(int(data.get('rnd', 0)))
         esp = abs(int(data.get('espionage', 0)))
+        target = data.get('target', "RANDOM")
     except (ValueError, TypeError):
         return jsonify({"error": "Invalid worker counts provided"}), 400
 
@@ -210,17 +219,15 @@ def deploy_workers(u_id):
     cursor = conn.cursor()
 
     try:
-        # 1. FETCH MAX WORKFORCE
         cursor.execute("SELECT max_workforce FROM users WHERE user_id = ?", (u_id,))
         res = cursor.fetchone()
-        
+
         if not res:
             return jsonify({"error": "User not found"}), 404
-        
+
         max_limit = res[0]
         total_requested = ext + rnd + esp
 
-        # 2. SAFETY MECHANISM
         if total_requested > max_limit:
             return jsonify({
                 "error": "Workforce limit exceeded",
@@ -228,19 +235,19 @@ def deploy_workers(u_id):
                 "max": max_limit
             }), 400
 
-        # 3. UPDATE DATABASE
         cursor.execute("""
             UPDATE users SET 
             workers_extraction = ?, 
             workers_rnd = ?, 
-            workers_espionage = ? ,
+            workers_espionage = ?,
+            espionage_taget = ?
             workforce_deployment_length = ?
             WHERE user_id = ?
-        """, (ext, rnd, esp, WORKFORCE_RETURN_TIME, u_id))
+        """, (ext, rnd, esp, target, WORKFORCE_RETURN_TIME, u_id))
 
         add_log(cursor=cursor, log_msg=f"Sent {ext + rnd + esp} workers.", u_id=u_id, log_type="HQ")
-
         conn.commit()
+
         return jsonify({
             "message": "Workers reassigned successfully",
             "distribution": {"extraction": ext, "rnd": rnd, "espionage": esp}
@@ -262,46 +269,37 @@ def buy_resource():
     conn = sqlite3.connect('market.db')
     cursor = conn.cursor()
     try:
-        # --- PRE-TRANSACTION SNAPSHOT ---
         cursor.execute("SELECT price, supply, demand FROM resources WHERE name = ?", (item,))
         res = cursor.fetchone()
-        if not res: return jsonify({"error": "Item not found"}), 400
-        
+        if not res:
+            return jsonify({"error": "Item not found"}), 400
+
         old_price, old_supply, old_demand = res
         total_cost = old_price * qty
-        
+
         cursor.execute("SELECT balance FROM users WHERE user_id = ?", (u_id,))
         balance = cursor.fetchone()[0]
 
         if balance < total_cost:
             return jsonify({"error": "Insufficient funds"}), 400
 
-        # 1. Update User Balance
         cursor.execute("UPDATE users SET balance = balance - ? WHERE user_id = ?", (total_cost, u_id))
-        
-        # 2. Apply Inverse Reaction
         cursor.execute("""
             UPDATE resources 
-            SET demand = demand + ?, 
-                supply = MAX(supply - ?, 1) 
+            SET demand = demand + ?, supply = MAX(supply - ?, 1) 
             WHERE name = ?
         """, (qty, qty, item))
-        
-        # 3. Add to inventory
         cursor.execute("""
             INSERT INTO inventory (user_id, resource_name, amount) VALUES (?, ?, ?)
             ON CONFLICT(user_id, resource_name) DO UPDATE SET amount = amount + ?
         """, (u_id, item, qty, qty))
 
-        # --- POST-TRANSACTION SNAPSHOT ---
         cursor.execute("SELECT supply, demand FROM resources WHERE name = ?", (item,))
         new_supply, new_demand = cursor.fetchone()
 
-        print(f"\n[🛒 BUY EVENT] User: {u_id} | Item: {item} | Qty: {qty}")
-        print(f"  💰 Price Per: ${old_price:,.2f} | Total: ${total_cost:,.2f}")
-        print(f"  📉 Supply: {old_supply} -> {new_supply} (Diff: -{qty})")
-        print(f"  📈 Demand: {old_demand} -> {new_demand} (Diff: +{qty})")
-        print("-" * 40)
+        print(f"\n[BUY] User: {u_id} | Item: {item} | Qty: {qty}")
+        print(f"  Price: ${old_price:,.2f} | Total: ${total_cost:,.2f}")
+        print(f"  Supply: {old_supply} -> {new_supply} | Demand: {old_demand} -> {new_demand}")
 
         add_log(cursor=cursor, log_msg=f"Purchased {qty}x {item} for ${total_cost:,.2f}.", u_id=u_id, log_type="BUY")
 
@@ -323,44 +321,35 @@ def sell_resource():
     conn = sqlite3.connect('market.db')
     cursor = conn.cursor()
     try:
-        # Check Inventory
         cursor.execute("SELECT amount FROM inventory WHERE user_id = ? AND resource_name = ?", (u_id, item))
         row = cursor.fetchone()
         if not row or row[0] < qty:
             return jsonify({"error": "Not enough items"}), 400
 
-        # --- PRE-TRANSACTION SNAPSHOT ---
         cursor.execute("SELECT price, supply, demand FROM resources WHERE name = ?", (item,))
         res = cursor.fetchone()
         current_price, old_supply, old_demand = res
-        
-        # Apply tax
+
         tax_rate = CURRENT_TAX
         gain = (current_price * qty) * (1.0 - tax_rate)
 
-        # 1. Update Balance
         cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (gain, u_id))
-        
-        # 2. Apply Inverse Reaction
         cursor.execute("""
             UPDATE resources 
-            SET supply = supply + ?, 
-                demand = MAX(demand - ?, 1) 
+            SET supply = supply + ?, demand = MAX(demand - ?, 1) 
             WHERE name = ?
         """, (qty, qty, item))
-        
-        # 3. Update Inventory
-        cursor.execute("UPDATE inventory SET amount = amount - ? WHERE user_id = ? AND resource_name = ?", (qty, u_id, item))
+        cursor.execute("""
+            UPDATE inventory SET amount = amount - ? 
+            WHERE user_id = ? AND resource_name = ?
+        """, (qty, u_id, item))
 
-        # --- POST-TRANSACTION SNAPSHOT ---
         cursor.execute("SELECT supply, demand FROM resources WHERE name = ?", (item,))
         new_supply, new_demand = cursor.fetchone()
 
-        print(f"\n[💰 SELL EVENT] User: {u_id} | Item: {item} | Qty: {qty}")
-        print(f"  💵 Market Price: ${current_price:,.2f} | Player Gained (Post-Tax): ${gain:,.2f}")
-        print(f"  📈 Supply: {old_supply} -> {new_supply} (Diff: +{qty})")
-        print(f"  📉 Demand: {old_demand} -> {new_demand} (Diff: -{qty})")
-        print("-" * 40)
+        print(f"\n[SELL] User: {u_id} | Item: {item} | Qty: {qty}")
+        print(f"  Market Price: ${current_price:,.2f} | Player Gained (Post-Tax): ${gain:,.2f}")
+        print(f"  Supply: {old_supply} -> {new_supply} | Demand: {old_demand} -> {new_demand}")
 
         add_log(cursor=cursor, log_msg=f"Sold {qty}x {item} for ${current_price*qty:,.2f}.", u_id=u_id, log_type="SELL")
 
@@ -371,19 +360,100 @@ def sell_resource():
         if conn: conn.close()
         return jsonify({"error": str(e)}), 500
 
-def add_log(cursor: sqlite3.Cursor, log_msg:str, u_id: str, log_type: str):
+
+# --- VOTING ROUTES ---
+
+@app.route('/api/vote/current')
+def get_current_vote():
+    conn = sqlite3.connect('market.db')
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT id, option_a, option_b, votes_a, votes_b, expires_at
+            FROM corporate_votes
+            WHERE expires_at > ?
+            ORDER BY expires_at DESC LIMIT 1
+        """, (time.time(),))
+        row = cursor.fetchone()
+
+        if not row:
+            return jsonify({"active": False}), 200
+
+        vote_id, opt_a, opt_b, votes_a, votes_b, expires_at = row
+        return jsonify({
+            "active": True,
+            "vote_id": vote_id,
+            "option_a": opt_a,
+            "option_b": opt_b,
+            "votes_a": votes_a,
+            "votes_b": votes_b,
+            "expires_at": expires_at,
+            "server_time": time.time()
+        }), 200
+    finally:
+        conn.close()
+
+
+@app.route('/api/vote/cast', methods=['POST'])
+def cast_vote():
+    """
+    Let a user vote on the active corporate proposal.
+    Body: { "user_id": "...", "vote_id": 1, "choice": "a" or "b" }
+    """
+    data = request.get_json()
+    u_id = data.get('user_id', '')
+    vote_id = data.get('vote_id')
+    choice = data.get('choice', '').lower()
+
+    if not u_id or not vote_id or choice not in ('a', 'b'):
+        return jsonify({"error": "Invalid request"}), 400
+
+    conn = sqlite3.connect('market.db')
+    cursor = conn.cursor()
+    try:
+        # Check vote is still active
+        cursor.execute("SELECT expires_at FROM corporate_votes WHERE id = ?", (vote_id,))
+        row = cursor.fetchone()
+        if not row or row[0] < time.time():
+            return jsonify({"error": "Vote has expired or does not exist"}), 400
+
+        # Prevent double voting
+        cursor.execute("""
+            SELECT 1 FROM vote_records WHERE vote_id = ? AND user_id = ?
+        """, (vote_id, u_id))
+        if cursor.fetchone():
+            return jsonify({"error": "Already voted"}), 400
+
+        # Record the vote
+        col = "votes_a" if choice == 'a' else "votes_b"
+        cursor.execute(f"UPDATE corporate_votes SET {col} = {col} + 1 WHERE id = ?", (vote_id,))
+        cursor.execute("""
+            INSERT INTO vote_records (vote_id, user_id, choice) VALUES (?, ?, ?)
+        """, (vote_id, u_id, choice))
+
+        conn.commit()
+        return jsonify({"message": "Vote cast successfully"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
+
+
+# --- HELPER ---
+
+def add_log(cursor: sqlite3.Cursor, log_msg: str, u_id: str, log_type: str):
     cursor.execute("""
         INSERT INTO activity_logs (user_id, action_type, message) 
         VALUES (?, ?, ?)
     """, (u_id, log_type, log_msg))
+
 
 # --- MARKET LOGIC ---
 
 def fetch_market_state():
     conn = sqlite3.connect('market.db')
     cursor = conn.cursor()
-    
-    # 1. FETCH MARKET
+
     cursor.execute("SELECT name, price, supply, demand, base_price FROM resources")
     market_rows = cursor.fetchall()
     market_data = []
@@ -400,7 +470,6 @@ def fetch_market_state():
         })
 
     all_histories = {}
-    
     for name in resource_names:
         cursor.execute("""
             SELECT price, timestamp FROM price_history 
@@ -408,19 +477,13 @@ def fetch_market_state():
             ORDER BY timestamp DESC LIMIT 30
         """, (name,))
         hist_rows = cursor.fetchall()
-        
-        item_history = []
-        for row in reversed(hist_rows):
-            item_history.append({
-                "time": time.strftime('%H:%M:%S', time.localtime(row[1])),
-                "price": round(row[0], 2)
-            })
-        all_histories[name] = item_history
+        all_histories[name] = [
+            {"time": time.strftime('%H:%M:%S', time.localtime(r[1])), "price": round(r[0], 2)}
+            for r in reversed(hist_rows)
+        ]
 
-    # 3. CALCULATE NEXT TICK
     now = time.time()
     next_tick = now + (TICK_INTERVAL - (now % TICK_INTERVAL))
-
     conn.close()
 
     return jsonify({
@@ -431,62 +494,85 @@ def fetch_market_state():
         "server_time": now
     })
 
-def calculate_market_price(current_price, base_price, supply, demand, last_change, rarity_index):
+
+def get_price_momentum(cursor: sqlite3.Cursor, resource_name: str, window: int = MOMENTUM_WINDOW) -> float:
     """
-    Elastic Equilibrium Model:
-    Scales non-linearly to prevent hyperinflation and uses rarity 
-    to dictate how aggressively the market reacts to shortages.
+    FIX 2: Rolling momentum window.
+    Returns the average price *change* over the last N ticks.
+    Previously the code only used last_change (1 tick), which caused
+    jittery, erratic charts. Averaging over 5 ticks smooths trends out.
     """
-    # 1. Non-linear Target Price (Incorporating Rarity)
-    # Higher rarity makes the price MORE sensitive to shortages (inelastic)
-    # Rarity 1 (Common) -> Elasticity 0.5 (Prices rise slowly during shortages)
-    # Rarity 5 (Legendary) -> Elasticity 1.15 (Prices spike aggressively)
-    elasticity = 0.35 + (rarity_index * 0.15) 
-    
+    cursor.execute("""
+        SELECT price FROM price_history
+        WHERE resource_name = ?
+        ORDER BY timestamp DESC
+        LIMIT ?
+    """, (resource_name, window + 1))
+    rows = cursor.fetchall()
+
+    if len(rows) < 2:
+        return 0.0
+
+    prices = [r[0] for r in rows]
+    changes = [prices[i] - prices[i + 1] for i in range(len(prices) - 1)]
+    return sum(changes) / len(changes)
+
+
+def calculate_market_price(current_price, base_price, supply, demand, momentum, rarity_index):
+    """
+    FIX 1 + FIX 2: Elastic Equilibrium Model — improved.
+
+    Changes vs original:
+    - `momentum` is now a rolling average (5 ticks) instead of last_change (1 tick)
+    - Price cap changed: instead of hard-capping the ratio at 50x, we cap the
+      *final price* at 20x base_price. This allows rare items to be volatile
+      but prevents Diamond from hitting astronomic numbers during low-pop play.
+    - Noise now scales with rarity so common goods are stable, rare goods are spicy.
+    """
+    # 1. Non-linear target price
+    elasticity = 0.35 + (rarity_index * 0.15)
     ratio = max(demand, 1) / max(supply, 1)
-    
-    # Apply elasticity exponent to prevent absurd linear scaling
-    adjusted_ratio = math.pow(ratio, elasticity) 
-    
-    # Hard cap the multiplier to protect game balance (e.g., max 50x base price)
-    adjusted_ratio = min(adjusted_ratio, 50.0)
+    adjusted_ratio = math.pow(ratio, elasticity)
+
+    # Cap the ratio — not the final price — to keep math sane
+    adjusted_ratio = min(adjusted_ratio, 15.0)
     target_price = base_price * adjusted_ratio
 
-    # 2. Calculate the Gap
-    diff = target_price - current_price
+    # FIX: Absolute price ceiling at 20x base to prevent hyperinflation
+    # in low-population games where nobody can push prices back down
+    price_ceiling = base_price * 20.0
+    target_price = min(target_price, price_ceiling)
 
-    # 3. Dynamic Reaction Speed
-    # React faster when the gap is huge (panic buying/selling)
-    # React slower when the gap is small (soft landing)
+    # 2. Gap and reaction speed
+    diff = target_price - current_price
     distance_ratio = abs(diff) / max(current_price, 1)
-    reaction_speed = 0.03 * (1 + distance_ratio) 
-    # Cap reaction speed so it doesn't instantly snap
+    reaction_speed = 0.03 * (1 + distance_ratio)
     reaction_speed = min(reaction_speed, 0.15)
-    
     movement = diff * reaction_speed
 
-    # 4. Dampened Momentum & Noise
-    # Only apply strong momentum if we are far from the target to prevent jitter
+    # 3. Smoothed momentum (rolling average, dampened near target)
     momentum_dampener = min(abs(diff) / base_price, 1.0)
-    momentum = last_change * 0.1 * momentum_dampener 
-    
-    # Noise scales with base price, so hyper-inflated goods don't swing wildly
-    noise = random.uniform(-0.01, 0.01) * base_price
-    
-    total_change = movement + momentum + noise
+    momentum_force = momentum * 0.1 * momentum_dampener
 
-    # 5. Dynamic Volatility Cap
-    # Rarer items have looser volatility limits (more volatile markets)
-    volatility_limit = 0.08 + (rarity_index * 0.02) 
+    # FIX: Noise scales with rarity so Wood is stable and Diamond is spicy
+    # Common (rarity 1) -> ±0.5% noise
+    # Legendary (rarity 5) -> ±2.5% noise
+    noise_scale = rarity_index * 0.005
+    noise = random.uniform(-noise_scale, noise_scale) * base_price
+
+    total_change = movement + momentum_force + noise
+
+    # 4. Volatility cap (rarer = looser cap, more volatile)
+    volatility_limit = 0.08 + (rarity_index * 0.02)
     max_move = current_price * volatility_limit
     total_change = max(min(total_change, max_move), -max_move)
 
     new_price = current_price + total_change
 
-    # 6. Safety Floor
-    # Ensure it never drops below 10% of base
+    # 5. Safety floor: never below 10% of base
     floor_price = base_price * 0.1
     return max(new_price, floor_price), total_change
+
 
 def run_tick():
     conn = sqlite3.connect('market.db')
@@ -497,16 +583,19 @@ def run_tick():
     all_resources = cursor.fetchall()
 
     for name, price, last_change, supply, demand, base_price, rarity_index in all_resources:
-        # 1. Calculate New Price
-        new_price, change = calculate_market_price(price, base_price, supply, demand, last_change, rarity_index)
+        # FIX 2: Use rolling momentum instead of single last_change
+        momentum = get_price_momentum(cursor, name)
 
-        # 2. MARKET DECAY (Equilibrium Logic)
-        # Every tick, Supply and Demand move back toward EQUILIBRIUM_LEVEL
-        # This prevents one massive buy from ruining the price forever.
-        new_supply = supply + (EQUILIBRIUM_LEVEL - supply) * MARKET_DECAY_RATE
-        new_demand = demand + (EQUILIBRIUM_LEVEL - demand) * MARKET_DECAY_RATE
+        new_price, change = calculate_market_price(
+            price, base_price, supply, demand, momentum, rarity_index
+        )
 
-        # Update the DB
+        # FIX 1: Per-rarity equilibrium — each resource decays toward its
+        # own natural level rather than a single EQUILIBRIUM_LEVEL = 200
+        equilibrium = EQUILIBRIUM_BY_RARITY.get(rarity_index, 5000)
+        new_supply = supply + (equilibrium - supply) * MARKET_DECAY_RATE
+        new_demand = demand + (equilibrium - demand) * MARKET_DECAY_RATE
+
         cursor.execute("""
             UPDATE resources 
             SET price = ?, last_change = ?, supply = ?, demand = ?, last_updated = ?
@@ -514,35 +603,30 @@ def run_tick():
         """, (new_price, change, new_supply, new_demand, now, name))
 
         cursor.execute("INSERT INTO price_history VALUES (?, ?, ?)", (name, new_price, now))
-        
-        print(f"[{name}] ${new_price:.2f} | S:{int(new_supply)} D:{int(new_demand)}")
+
+        print(f"[{name}] ${new_price:.2f} | S:{int(new_supply)} D:{int(new_demand)} | EQ:{equilibrium}")
 
     cursor.execute("DELETE FROM price_history WHERE timestamp < ?", (now - HISTORY_RETAIN_TIME,))
+
+    handle_workers_done(cursor)
+
     conn.commit()
     conn.close()
 
-    handle_workers_done()
 
 def get_user_logs(user_id, limit=15):
     conn = sqlite3.connect('market.db')
     cursor = conn.cursor()
-    # Fetch action_type so we know what color to use
     cursor.execute("""
-        SELECT 
-            message, 
-            datetime(timestamp, 'localtime') as local_ts, 
-            action_type 
+        SELECT message, datetime(timestamp, 'localtime'), action_type
         FROM activity_logs 
         WHERE user_id = ? 
         ORDER BY timestamp DESC 
         LIMIT ?
     """, (user_id, limit))
-    
     raw_logs = cursor.fetchall()
     conn.close()
 
-    # Define your color mapping
-    # These strings will be used as Tailwind classes in React
     color_map = {
         'BUY': 'text-emerald-400',
         'SELL': 'text-blue-400',
@@ -552,68 +636,22 @@ def get_user_logs(user_id, limit=15):
         'HQ': 'text-amber-400',
         'FAIL': 'text-red-600',
         'KILLED': 'text-red-600',
+        'VOTE': 'text-purple-400',
     }
 
     formatted_logs = []
     for message, ts_string, action_type in raw_logs:
         dt_obj = datetime.strptime(ts_string, '%Y-%m-%d %H:%M:%S')
-        time_str = dt_obj.strftime('%H:%M:%S')
-
         formatted_logs.append({
-            "text": f"[{time_str}] {message}",
-            "color": color_map.get(action_type, 'text-white') # Default to white
+            "text": f"[{dt_obj.strftime('%H:%M:%S')}] {message}",
+            "color": color_map.get(action_type, 'text-white')
         })
-
     return formatted_logs
 
 
-def market_loop():
-    while True:
-        now = time.time()
-        time_to_next = TICK_INTERVAL - (now % TICK_INTERVAL)
-        time.sleep(time_to_next) 
+# --- WORKER LOGIC ---
 
-        run_tick()
-
-
-def sync_table_schema(conn, table_name, schema_definition):
-    """
-    Ensures the table exists and has all columns defined in the schema_definition.
-    Note: schema_definition should be the content inside the CREATE TABLE (...)
-    """
-    cursor = conn.cursor()
-    
-    # 1. Create the table if it doesn't exist at all
-    conn.execute(f"CREATE TABLE IF NOT EXISTS {table_name} ({schema_definition})")
-    
-    # 2. Get existing columns from the DB
-    cursor.execute(f"PRAGMA table_info({table_name})")
-    existing_columns = {row[1] for row in cursor.fetchall()}
-    
-    # 3. Parse the schema_definition to find column names and types
-    # This is a simple parser that looks for lines starting with column names
-    for line in schema_definition.strip().split(','):
-        parts = line.strip().split()
-        if not parts: continue
-        
-        column_name = parts[0].replace('"', '').replace('`', '')
-        
-        # If the column name isn't in the DB and isn't a table constraint (like PRIMARY KEY)
-        if column_name not in existing_columns and column_name.upper() not in ("PRIMARY", "FOREIGN", "CONSTRAINT", "UNIQUE"):
-            # Construct the ALTER TABLE command
-            # We join the rest of the line back together to get the type and defaults
-            column_def = " ".join(parts[1:])
-            try:
-                conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_def}")
-                print(f"Migration: Added column '{column_name}' to table '{table_name}'")
-            except sqlite3.OperationalError as e:
-                print(f"Migration Error on '{column_name}': {e}")
-
-def handle_workers_done():
-    conn = sqlite3.connect('market.db')
-    cursor = conn.cursor()
-
-    # Decreases deployment timers for all active users by 1
+def handle_workers_done(cursor: sqlite3.Cursor):
     cursor.execute("""
         UPDATE users 
         SET workforce_deployment_length = workforce_deployment_length - 1 
@@ -621,7 +659,7 @@ def handle_workers_done():
     """)
 
     cursor.execute("""
-        SELECT user_id, workers_extraction, workers_rnd, workers_espionage, max_workforce
+        SELECT user_id, workers_extraction, workers_rnd, workers_espionage, espionage_taget, max_workforce
         FROM users 
         WHERE workforce_deployment_length = 0 
         AND (workers_extraction + workers_rnd + workers_espionage) > 0
@@ -629,142 +667,119 @@ def handle_workers_done():
     finished_users = cursor.fetchall()
 
     for user_data in finished_users:
-        u_id, ext, rnd, esp, max_wf = user_data
-        
-        # Call your existing reward logic for this specific user
-        # Note: You'll need to update handle_workers_reward to accept these values
-        handle_workers_reward(cursor, finished_users)
-
-        # RESET workers ONLY for this specific user
+        u_id = user_data[0]
+        handle_workers_reward(cursor, [user_data])
         cursor.execute("""
             UPDATE users SET 
                 workers_extraction = 0, 
                 workers_rnd = 0, 
-                workers_espionage = 0
+                workers_espionage = 0,
+                workers_espionage = RANDOM
             WHERE user_id = ?
         """, (u_id,))
 
-    print(f"Tick Event: Processed {len(finished_users)} completed deployments.")
+    print(f"Tick: Processed {len(finished_users)} completed deployments.")
 
-    conn.commit()
-    conn.close()
 
-def handle_workers_reward(cursor: sqlite3.Cursor, active_users: list[tuple]):
+def handle_workers_reward(cursor: sqlite3.Cursor, active_users: list):
     global RECRUITING_CHANCE
 
-    # Calculate success chance for gathering materials
     cursor.execute("SELECT name, rarity_index FROM resources")
     rarity_map = {row[0]: row[1] for row in cursor.fetchall()}
 
-    for u_id, ext_count, rnd_count, sabo_count, max_wf in active_users:
-        # Start with the random split
+    for u_id, ext_count, rnd_count, sabo_count, espionage_taget, max_wf in active_users:
+        # Split R&D workers between enhancers and recruiters
         rnd_splitter = random.randint(0, rnd_count)
-        # Apply 25% / 75% "Safety Zone"
         floor = int(rnd_count / 4)
         ceiling = int(rnd_count / 4 * 3)
-        # Clamp the value between floor and ceiling
         rnd_splitter = max(floor, min(rnd_splitter, ceiling))
-        # Apply the Efficiency Cap (Cannot have more enhancers than extractors)
-        # This ensures research doesn't exceed the actual workforce capability.
         enhancers = min(rnd_splitter, ext_count)
-        # Give the remainder to recruiters
         recruiters = rnd_count - enhancers
 
-        print(f"Split the workers for User {u_id} into - {enhancers} enhancers and - {recruiters} recruiters.")
+        print(f"User {u_id}: {enhancers} enhancers, {recruiters} recruiters")
 
-        overall_recruted = 0
-
-        # Calculate success chance for each recruiting
-        success_threshold = RECRUITING_CHANCE
-
+        # --- RECRUITING ---
+        overall_recruited = 0
         for _ in range(recruiters):
-            roll = random.uniform(0, 100)
-            
-            if roll <= success_threshold:
-                # SUCCESS
-                overall_recruted += 1
-                print(f"User {u_id}-{_} recruted Someone (Chance: {success_threshold:.1f}%)")
-            else:
-                print(f"User {u_id}-{_} recruting failed (Rolled {roll:.1f} vs {success_threshold:.1f}%)")
+            if random.uniform(0, 100) <= RECRUITING_CHANCE:
+                overall_recruited += 1
 
-        overall_rewards = extraction_reward(rarity_map, enhancers, max_wf, u_id, ext_count)
-
-        if sabo_count > 0:
-            # 1. Find a random target who is NOT the current user
-            cursor.execute("""
-                SELECT user_id FROM users 
-                WHERE user_id != ? 
-                ORDER BY RANDOM() LIMIT 1
-            """, (u_id,))
-            
-            target_row = cursor.fetchone()
-
-            if sabo_count > 0:
-                # Pick a target that isn't the current user
-                cursor.execute("SELECT user_id FROM users WHERE user_id != ? ORDER BY RANDOM() LIMIT 1", (u_id,))
-                target_res = cursor.fetchone()
-
-                if target_res:
-                    target_id = target_res[0]
-                    # Run the logic
-                    rewards = sabotage_reward(cursor, u_id, target_id, sabo_count)
-
-                    if rewards["user_eliminated"] > 0 and rewards["failed"]:
-                        count = rewards['user_eliminated']
-                        msg = f"Failed sabotage with casualties - {count} worker{'s' if count != 1 else ''} have been killed."
-                        add_log(cursor=cursor, log_msg=msg, u_id=u_id, log_type='FAIL')
-                    elif rewards["target_eliminated"] > 0:
-                        count = rewards['target_eliminated']
-                        msg = f"Completed sabotage - {count} worker{'s' if count != 1 else ''} have been killed for {target_id}."
-                        add_log(cursor=cursor, log_msg=msg, u_id=u_id, log_type='SABOTAGE')
-                    else:
-                        add_log(cursor=cursor, log_msg=f"Sabotage failed, no casualties", u_id=u_id, log_type='SABOTAGE')
-
-
-        if overall_recruted > 0:
-            cursor.execute("""
-                UPDATE users 
-                SET max_workforce = max_workforce + ? 
-                WHERE user_id = ?
-            """, (overall_recruted, u_id))
-            print(f"User {u_id} expanded workforce capacity by {overall_recruted}!")
-            add_log(cursor=cursor, log_msg=f"R&D Team managed to recruit {overall_recruted} workers.", u_id=u_id, log_type="HQ")
+        # --- EXTRACTION ---
+        # FIX 3: Diminishing returns on large extraction armies.
+        # Without this, sending 100 workers is strictly 100x better than sending 1.
+        # Now, effective_extractors grows sub-linearly: doubling workers gives ~1.4x output.
+        # The sqrt scale means small teams are efficient, large teams face coordination overhead.
+        if ext_count > 0:
+            effective_extractors = math.sqrt(ext_count) * math.sqrt(ext_count + 1) / 2
+            effective_extractors = max(1, int(effective_extractors))
         else:
-            print(f"User {u_id} recruiting failed completely")
+            effective_extractors = 0
+
+        overall_rewards = extraction_reward(rarity_map, enhancers, max_wf, u_id, effective_extractors)
+
+        # --- SABOTAGE ---
+        if sabo_count > 0:
+            if (espionage_taget != "RANDOM"):
+                cursor.execute("SELECT user_id FROM users WHERE user_id == ? LIMIT 1", (espionage_taget,))
+            else:
+                cursor.execute("SELECT user_id FROM users WHERE user_id != ? ORDER BY RANDOM() LIMIT 1", (u_id,))
+            
+            target_res = cursor.fetchone()
+
+            if target_res:
+                target_id = target_res[0]
+                rewards = sabotage_reward(cursor, u_id, target_id, sabo_count)
+
+                if rewards["failed"]:
+                    count = rewards['user_eliminated']
+                    msg = f"Sabotage failed — {count} of your worker{'s were' if count != 1 else ' was'} killed."
+                else:
+                    parts = []
+
+                    if rewards["target_eliminated"] > 0:
+                        count = rewards['target_eliminated']
+                        parts.append(f"{count} worker{'s' if count != 1 else ''} neutralized")
+
+                    if rewards["money_stolen"] > 0:
+                        parts.append(f"${rewards['money_stolen']:,.2f} stolen")
+
+                    if rewards["materials_stolen"]:
+                        summary = ", ".join(f"{amt}x {res}" for res, amt in rewards["materials_stolen"].items())
+                        parts.append(f"{summary} stolen")
+
+                    if parts:
+                        msg = f"Sabotage success — {', '.join(parts)}."
+                    else:
+                        msg = "Sabotage mission returned empty handed."
+
+                add_log(cursor, msg, u_id, 'FAIL' if rewards["failed"] else 'SABOTAGE')
+
+        # --- APPLY RESULTS ---
+        if overall_recruited > 0:
+            cursor.execute("""
+                UPDATE users SET max_workforce = max_workforce + ? WHERE user_id = ?
+            """, (overall_recruited, u_id))
+            add_log(cursor, f"R&D recruited {overall_recruited} new worker{'s' if overall_recruited != 1 else ''}.", u_id, "HQ")
 
         if overall_rewards:
             for res_name, amount in overall_rewards.items():
-                # 1. Update Player Inventory (You already have this)
                 cursor.execute("""
-                    INSERT INTO inventory (user_id, resource_name, amount) 
-                    VALUES (?, ?, ?)
-                    ON CONFLICT(user_id, resource_name) 
-                    DO UPDATE SET amount = amount + ?
+                    INSERT INTO inventory (user_id, resource_name, amount) VALUES (?, ?, ?)
+                    ON CONFLICT(user_id, resource_name) DO UPDATE SET amount = amount + ?
                 """, (u_id, res_name, amount, amount))
-                
-                # 2. UPDATE GLOBAL MARKET SUPPLY
-                # This ensures that as players find more, the global price drops.
-                cursor.execute("""
-                    UPDATE resources 
-                    SET supply = supply + ? 
-                    WHERE name = ?
-                """, (amount, res_name))
-                
-                # Debugging prints
-                print(f"User {u_id} gathered {amount}x {res_name}")
-                print(f"  [🌍 MARKET] Global supply of {res_name} increased by {amount}.")
-            
-            # Summary print
+                cursor.execute("UPDATE resources SET supply = supply + ? WHERE name = ?", (amount, res_name))
+
             summary = ", ".join([f"{amt}x {name}" for name, amt in overall_rewards.items()])
-            print(f"✅ Total harvest for User {u_id}: {summary}")
-            add_log(cursor=cursor, log_msg=f"Extraction Team managed to harvest: {summary}.", u_id=u_id, log_type="HQ")
+            print(f"Harvest for {u_id}: {summary}")
+            add_log(cursor, f"Extraction harvested: {summary}.", u_id, "HQ")
         else:
-            print(f"User {u_id} mining failed completely")
+            print(f"User {u_id} extraction came up empty.")
+
 
 def extraction_reward(rarity_map: dict, enhancers: int, max_wf: int, u_id: str, workers: int):
     resources = list(rarity_map.keys())
     overall_rewards = {}
-    
+
     for _ in range(workers):
         rnd_ratio = enhancers / max(max_wf, 1)
         weights = []
@@ -773,115 +788,391 @@ def extraction_reward(rarity_map: dict, enhancers: int, max_wf: int, u_id: str, 
             target_weight = (rnd_ratio * rarity) + (1 - rnd_ratio) * (1 / rarity)
             weights.append(target_weight)
 
-        # Pick the target based on weights
         resource_to_mine = random.choices(resources, weights=weights, k=1)[0]
         rarity = rarity_map[resource_to_mine]
 
-        # --- SUCCESS CALCULATION ---
-        # base_potential is your "skill" (25% to 100%) - This isn't actually a 100% success, only if they managed to find anything at all
-        base_potential = 25 + (rnd_ratio * 75) 
-        # Flatten the rarity impact
-        stability_factor = 0.6 
+        base_potential = 25 + (rnd_ratio * 75)
+        stability_factor = 0.6
         dampened_rarity = math.pow(rarity, stability_factor)
-        # Calculate final threshold
-        final_success_threshold = base_potential / dampened_rarity
-        # Clamp a minimum success floor so it's never 0%
-        final_success_threshold = max(final_success_threshold, 5.0)
+        final_success_threshold = max(base_potential / dampened_rarity, 5.0)
 
         roll = random.uniform(0, 100)
-        
         if roll <= final_success_threshold:
-            # SUCCESS: Track which specific resource was found
             overall_rewards[resource_to_mine] = overall_rewards.get(resource_to_mine, 0) + 1
-            print(f"User {u_id}-{_} mined {resource_to_mine} (Chance: {final_success_threshold:.1f}%)")
-        else:
-            # FAILED
-            print(f"User {u_id}-{_} mining failed to mine {resource_to_mine} (Rolled {roll:.1f} vs {final_success_threshold:.1f}%)")
-            pass
+        # else: no reward, worker came up empty
+
     return overall_rewards
 
-def sabotage_reward(cursor, user_id, target_id, sabo_count):
-    global SABOTAGE_MAX_DETECTION_SEND
-    global SABOTAGE_MAX_DETECTION_PRECENT
-    global SABOTAGE_CHANCE_OF_DEATH
 
-    # Calculate success rate
-    precent_for_caught = min((sabo_count / SABOTAGE_MAX_DETECTION_SEND) * SABOTAGE_MAX_DETECTION_PRECENT, SABOTAGE_MAX_DETECTION_PRECENT)
-    print(f"Getting caught precent - {precent_for_caught}")
-    success_chance = 5 
+def sabotage_reward(cursor, user_id, target_id, sabo_count):
+    global SABOTAGE_MAX_DETECTION_SEND, SABOTAGE_MAX_DETECTION_PRECENT, SABOTAGE_CHANCE_OF_DEATH
+
+    ACTIONS = ["steal_materials", "steal_money", "neutralize"]
+
+    # Detection risk scales with how many agents you send
+    precent_for_caught = min(
+        (sabo_count / SABOTAGE_MAX_DETECTION_SEND) * SABOTAGE_MAX_DETECTION_PRECENT,
+        SABOTAGE_MAX_DETECTION_PRECENT
+    )
+
+    # Success chance scales with squad size, capped at 25%
+    base_success = 5.0
+    bonus_per_agent = 2.0
+    success_chance = min(base_success + (sabo_count * bonus_per_agent), 25.0)
+
+    print(f"Sabotage: catch={precent_for_caught:.1f}% success={success_chance:.1f}%")
+
     user_eliminated_total = 0
     target_eliminated_total = 0
+    materials_stolen = {}   # { resource_name: amount }
+    money_stolen = 0.0
     failed = False
 
-    if (precent_for_caught > SABOTAGE_CHANCE_OF_DEATH): # Chance for death of own workers is only if risk is above SABOTAGE_CHANCE_OF_DEATH
+    # --- PHASE 1: Detection check (only risks death if risk exceeds the death threshold) ---
+    if precent_for_caught > SABOTAGE_CHANCE_OF_DEATH:
         for _ in range(sabo_count):
-            roll = random.uniform(0, 100)
-            if roll <= precent_for_caught:
+            if random.uniform(0, 100) <= precent_for_caught:
                 user_eliminated_total += 1
                 failed = True
+
+    # --- PHASE 2: Each surviving agent independently picks and attempts an action ---
     if not failed:
-        for _ in range(sabo_count):
-            roll = random.uniform(0, 100)
-            if roll <= success_chance:
+        surviving_agents = sabo_count - user_eliminated_total
+
+        # Fetch target's inventory for steal_materials rolls
+        cursor.execute("""
+            SELECT resource_name, amount FROM inventory
+            WHERE user_id = ? AND amount > 0
+        """, (target_id,))
+        target_inventory = {row[0]: row[1] for row in cursor.fetchall()}
+
+        # Fetch target's balance for steal_money rolls
+        cursor.execute("SELECT balance FROM users WHERE user_id = ?", (target_id,))
+        target_balance_row = cursor.fetchone()
+        target_balance = target_balance_row[0] if target_balance_row else 0.0
+
+        for _ in range(surviving_agents):
+            if random.uniform(0, 100) > success_chance:
+                continue  # This agent failed silently
+
+            action = random.choice(ACTIONS)
+
+            if action == "neutralize":
                 target_eliminated_total += 1
 
+            elif action == "steal_money":
+                # Steal between 1% and 5% of target's current balance per agent
+                if target_balance > 0:
+                    stolen = target_balance * random.uniform(0.01, 0.05)
+                    stolen = round(stolen, 2)
+                    money_stolen += stolen
+                    target_balance -= stolen  # Track locally so agents don't over-steal
+
+            elif action == "steal_materials":
+                # Pick a random resource the target actually owns
+                available = [(r, a) for r, a in target_inventory.items() if a > 0]
+                if available:
+                    resource, amount = random.choice(available)
+                    # Steal 1 unit per agent (keeps it meaningful but not devastating)
+                    materials_stolen[resource] = materials_stolen.get(resource, 0) + 1
+                    target_inventory[resource] = max(0, target_inventory[resource] - 1)
+
+    # --- PHASE 3: Apply all results to the database ---
+
     if user_eliminated_total > 0:
-        # Decrease the user's workforce, but keep it at a minimum of 5
         cursor.execute("""
-            UPDATE users 
-            SET max_workforce = MAX(5, max_workforce - ?) 
-            WHERE user_id = ?
+            UPDATE users SET max_workforce = MAX(5, max_workforce - ?) WHERE user_id = ?
         """, (user_eliminated_total, user_id))
-        print(f"🎯 User {user_id} lost {user_eliminated_total} workers.")
+        print(f"User {user_id} lost {user_eliminated_total} agents.")
 
     if target_eliminated_total > 0:
-        # Decrease the target's workforce, but keep it at a minimum of 5
         cursor.execute("""
-            UPDATE users 
-            SET max_workforce = MAX(5, max_workforce - ?) 
-            WHERE user_id = ?
+            UPDATE users SET max_workforce = MAX(5, max_workforce - ?) WHERE user_id = ?
         """, (target_eliminated_total, target_id))
-        add_log(cursor=cursor, log_msg=f"User {user_id} killed {target_eliminated_total} of your workers", u_id=target_id, log_type='KILLED')
-        print(f"🎯 User {user_id} successfully eliminated {target_eliminated_total} workers from User {target_id}!")
+        add_log(cursor, f"User {user_id} eliminated {target_eliminated_total} of your workers.", target_id, "KILLED")
 
-    return {"user_eliminated": user_eliminated_total, "target_eliminated": target_eliminated_total, "failed": failed}
+    if money_stolen > 0:
+        cursor.execute("UPDATE users SET balance = MAX(0, balance - ?) WHERE user_id = ?", (money_stolen, target_id))
+        cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (money_stolen, user_id))
+        add_log(cursor, f"User {user_id} stole ${money_stolen:,.2f} from you.", target_id, "KILLED")
+        print(f"User {user_id} stole ${money_stolen:,.2f} from {target_id}.")
+
+    if materials_stolen:
+        for resource, amount in materials_stolen.items():
+            # Remove from target
+            cursor.execute("""
+                UPDATE inventory SET amount = MAX(0, amount - ?)
+                WHERE user_id = ? AND resource_name = ?
+            """, (amount, target_id, resource))
+            # Add to attacker
+            cursor.execute("""
+                INSERT INTO inventory (user_id, resource_name, amount) VALUES (?, ?, ?)
+                ON CONFLICT(user_id, resource_name) DO UPDATE SET amount = amount + ?
+            """, (user_id, resource, amount, amount))
+        summary = ", ".join(f"{amt}x {res}" for res, amt in materials_stolen.items())
+        add_log(cursor, f"User {user_id} stole {summary} from you.", target_id, "KILLED")
+        print(f"User {user_id} stole {summary} from {target_id}.")
+
+    return {
+        "user_eliminated": user_eliminated_total,
+        "target_eliminated": target_eliminated_total,
+        "money_stolen": money_stolen,
+        "materials_stolen": materials_stolen,
+        "failed": failed,
+    }
+
+
+# --- CORPORATE VOTE LOGIC ---
+
+def create_new_vote(cursor: sqlite3.Cursor):
+    """
+    FIX 5: Fully wired corporate vote system.
+    Picks two random proposals, creates a vote that expires after VOTE_INTERVAL seconds.
+    Called once per hour by the vote loop.
+    """
+    options = random.sample(CORPORATE_CHANGES_OPTIONS, 2)
+    expires_at = time.time() + VOTE_INTERVAL
+    cursor.execute("""
+        INSERT INTO corporate_votes (option_a, option_b, votes_a, votes_b, expires_at)
+        VALUES (?, ?, 0, 0, ?)
+    """, (options[0], options[1], expires_at))
+    vote_id = cursor.lastrowid
+    print(f"[VOTE] New corporate vote #{vote_id} created. Expires at {time.strftime('%H:%M:%S', time.localtime(expires_at))}")
+    print(f"  A: {options[0]}")
+    print(f"  B: {options[1]}")
+    return vote_id
+
+
+def apply_vote_result(cursor: sqlite3.Cursor, vote_id: int):
+    """
+    Reads the winning option from a completed vote and applies its effect.
+    """
+    global CURRENT_TAX, RECRUITING_CHANCE, SABOTAGE_MAX_DETECTION_PRECENT
+    global SABOTAGE_MAX_DETECTION_SEND, SABOTAGE_CHANCE_OF_DEATH, WORKFORCE_RETURN_TIME
+    global SHOW_INVENTORY_IN_LEADERBOARD
+
+    cursor.execute("""
+        SELECT option_a, option_b, votes_a, votes_b
+        FROM corporate_votes WHERE id = ?
+    """, (vote_id,))
+    row = cursor.fetchone()
+    if not row:
+        return
+
+    opt_a, opt_b, votes_a, votes_b = row
+
+    # Tiebreaker: random
+    if votes_a >= votes_b:
+        winner = opt_a
+    else:
+        winner = opt_b
+
+    print(f"[VOTE] Vote #{vote_id} resolved. Winner: '{winner}' ({votes_a} vs {votes_b})")
+
+    # --- Apply the effect based on which option won ---
+    if "Tax Policy + 0.05" in winner:
+        CURRENT_TAX = min(CURRENT_TAX + 0.0005, 0.03)
+    elif "Tax Policy - 0.05" in winner:
+        CURRENT_TAX = max(CURRENT_TAX - 0.0005, 0.0003)
+    elif "Tax Policy + 0.07" in winner:
+        CURRENT_TAX = min(CURRENT_TAX + 0.0007, 0.03)
+    elif "Tax Policy - 0.07" in winner:
+        CURRENT_TAX = max(CURRENT_TAX - 0.0007, 0.0003)
+    elif "Tax Policy + 0.02" in winner:
+        CURRENT_TAX = min(CURRENT_TAX + 0.0002, 0.03)
+    elif "Tax Policy - 0.02" in winner:
+        CURRENT_TAX = max(CURRENT_TAX - 0.0002, 0.0003)
+
+    elif "Unemployment" in winner:
+        RECRUITING_CHANCE = min(RECRUITING_CHANCE + 5, 50)
+    elif "Tough Market" in winner:
+        RECRUITING_CHANCE = max(RECRUITING_CHANCE - 5, 5)
+
+    elif "Global Security Crisis" in winner and "success chance" in winner:
+        SABOTAGE_MAX_DETECTION_PRECENT = max(SABOTAGE_MAX_DETECTION_PRECENT - 10, 5)
+    elif "Global Security Upgrades" in winner and "success chance" in winner:
+        SABOTAGE_MAX_DETECTION_PRECENT = min(SABOTAGE_MAX_DETECTION_PRECENT + 10, 80)
+    elif "Global Security Crisis" in winner and "death" in winner:
+        SABOTAGE_CHANCE_OF_DEATH = max(SABOTAGE_CHANCE_OF_DEATH - 5, 5)
+    elif "Global Security Upgrades" in winner and "death" in winner:
+        SABOTAGE_CHANCE_OF_DEATH = min(SABOTAGE_CHANCE_OF_DEATH + 5, 60)
+
+    elif "Area Contaminated" in winner:
+        WORKFORCE_RETURN_TIME = min(WORKFORCE_RETURN_TIME + 1, 5)
+    elif "New Area Found" in winner:
+        WORKFORCE_RETURN_TIME = max(WORKFORCE_RETURN_TIME - 1, 1)
+
+    elif "Public Report" in winner:
+        SHOW_INVENTORY_IN_LEADERBOARD = 10
+
+    elif "$element_name" in winner:
+        # Pick a random resource for the element-specific votes
+        cursor.execute("SELECT name, base_price FROM resources ORDER BY RANDOM() LIMIT 1")
+        res = cursor.fetchone()
+        if res:
+            res_name, base_price = res
+            if "increased in value" in winner:
+                update_resource_base_price(cursor, res_name, base_price * 1.20)
+            elif "decreased in value" in winner:
+                update_resource_base_price(cursor, res_name, base_price * 0.80)
+            elif "increased in demand" in winner:
+                update_resource_demand(cursor, res_name, base_price * 0.10)
+            elif "decreased in demand" in winner:
+                update_resource_demand(cursor, res_name, -(base_price * 0.10))
+            winner = winner.replace("$element_name", res_name)
+
+    # Broadcast to all users as a system log
+    cursor.execute("SELECT user_id FROM users")
+    all_users = cursor.fetchall()
+    for (uid,) in all_users:
+        add_log(cursor, f"[Corporate] New policy enacted: {winner}", uid, "SYSTEM")
+
+    print(f"[VOTE] Effect applied. CURRENT_TAX={CURRENT_TAX:.4f} RECRUITING_CHANCE={RECRUITING_CHANCE}")
+
+
+# --- RESOURCE HELPERS ---
 
 def update_resource_base_price(cursor, resource_name, new_base_price):
     try:
         cursor.execute("""
             UPDATE resources 
-            SET 
-                last_change = ? - base_price,
-                base_price = ?,
-                price = (price - base_price) + ?
+            SET last_change = ? - base_price, base_price = ?, price = (price - base_price) + ?
             WHERE name = ?
         """, (new_base_price, new_base_price, new_base_price, resource_name.capitalize()))
-        
         return True
     except Exception as e:
         print(f"Error updating base price: {e}")
         return False
-    
+
+
 def update_resource_demand(cursor: sqlite3.Cursor, resource_name: str, add_demand: float):
     try:
         cursor.execute("""
-            UPDATE resources 
-            SET 
-                demand = demand + ?
-            WHERE name = ?
+            UPDATE resources SET demand = demand + ? WHERE name = ?
         """, (add_demand, resource_name.capitalize()))
-        
-        print(f"Added {add_demand} demand")
+        print(f"Added {add_demand} demand to {resource_name}")
         return True
     except Exception as e:
-        print(f"Error updating base price: {e}")
+        print(f"Error updating demand: {e}")
         return False
 
+
+# --- BACKGROUND LOOPS ---
+
+def market_loop():
+    while True:
+        now = time.time()
+        time.sleep(TICK_INTERVAL - (now % TICK_INTERVAL))
+        run_tick()
+
+
+def corporate_vote_loop():
+    """
+    FIX 5: Corporate vote loop is now fully implemented.
+    Every VOTE_INTERVAL seconds:
+      1. Resolve the previous vote (apply its effect)
+      2. Create a new vote for the next period
+    """
+    while True:
+        now = time.time()
+        time.sleep(VOTE_INTERVAL - (now % VOTE_INTERVAL))
+
+        conn = sqlite3.connect('market.db')
+        cursor = conn.cursor()
+        try:
+            # 1. Find and resolve any expired unresolved votes
+            cursor.execute("""
+                SELECT id FROM corporate_votes
+                WHERE expires_at <= ? AND resolved = 0
+                ORDER BY expires_at ASC
+            """, (time.time(),))
+            expired = cursor.fetchall()
+
+            for (vote_id,) in expired:
+                apply_vote_result(cursor, vote_id)
+                cursor.execute("UPDATE corporate_votes SET resolved = 1 WHERE id = ?", (vote_id,))
+
+            # 2. Create the next vote
+            create_new_vote(cursor)
+
+            conn.commit()
+        except Exception as e:
+            print(f"[VOTE LOOP ERROR] {e}")
+        finally:
+            conn.close()
+
+
+# --- SCHEMA HELPERS ---
+
+def split_schema_lines(schema_definition):
+    lines = []
+    current_line = []
+    paren_depth = 0
+    for char in schema_definition:
+        if char == '(':
+            paren_depth += 1
+            current_line.append(char)
+        elif char == ')':
+            paren_depth -= 1
+            current_line.append(char)
+        elif char == ',' and paren_depth == 0:
+            lines.append(''.join(current_line).strip())
+            current_line = []
+        else:
+            current_line.append(char)
+    if current_line:
+        lines.append(''.join(current_line).strip())
+    return lines
+
+
+def sync_table_schema(conn, table_name, schema_definition):
+    cursor = conn.cursor()
+    conn.execute(f"CREATE TABLE IF NOT EXISTS {table_name} ({schema_definition})")
+
+    cursor.execute(f"PRAGMA table_info({table_name})")
+    db_columns = {row[1] for row in cursor.fetchall()}
+    db_columns_lower = {col.lower() for col in db_columns}
+
+    expected_columns = {}
+    for line in split_schema_lines(schema_definition):
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split()
+        if not parts:
+            continue
+        raw_name = parts[0].replace('"', '').replace('`', '').replace('(', '').replace(')', '')
+        if raw_name.upper() in ("PRIMARY", "FOREIGN", "CONSTRAINT", "UNIQUE", "CHECK"):
+            continue
+        col_name = parts[0].replace('"', '').replace('`', '')
+        col_def = " ".join(parts[1:])
+        expected_columns[col_name.lower()] = {"name": col_name, "definition": col_def}
+
+    expected_columns_lower = set(expected_columns.keys())
+
+    for col_lower in expected_columns_lower - db_columns_lower:
+        col = expected_columns[col_lower]["name"]
+        col_def = expected_columns[col_lower]["definition"]
+        try:
+            conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {col} {col_def}")
+            print(f"Migration: Added column '{col}' to '{table_name}'")
+        except sqlite3.OperationalError as e:
+            print(f"Migration Error adding '{col}': {e}")
+
+    for col_lower in db_columns_lower - expected_columns_lower:
+        orig_col = next(col for col in db_columns if col.lower() == col_lower)
+        try:
+            conn.execute(f"ALTER TABLE {table_name} DROP COLUMN {orig_col}")
+            print(f"Migration: Dropped column '{orig_col}' from '{table_name}'")
+        except sqlite3.OperationalError as e:
+            print(f"Migration Error dropping '{orig_col}': {e}")
+
+
 # --- INITIALIZATION ---
+
 if __name__ == "__main__":
     conn = sqlite3.connect('market.db')
 
-    # Define Schemas
     RESOURCES_SCHEMA = """
         name TEXT PRIMARY KEY, 
         price REAL, 
@@ -892,7 +1183,7 @@ if __name__ == "__main__":
         base_price REAL,
         rarity_index INTEGER
     """
-    
+
     USERS_SCHEMA = """
         user_id TEXT PRIMARY KEY, 
         balance REAL,
@@ -900,6 +1191,7 @@ if __name__ == "__main__":
         workers_extraction INTEGER DEFAULT 0,
         workers_rnd INTEGER DEFAULT 0,
         workers_espionage INTEGER DEFAULT 0,
+        espionage_taget TEXT,
         workforce_deployment_length INTEGER DEFAULT 0
     """
 
@@ -913,27 +1205,54 @@ if __name__ == "__main__":
     ACTIVITY_LOGS = """
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT,
-        action_type TEXT, -- e.g., 'BUY', 'SELL', 'SABOTAGE'
+        action_type TEXT,
         message TEXT,
         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(user_id) REFERENCES users(user_id)
     """
 
-    # Sync them!
+    SYSTEM_SCHEMA = """
+        id INTEGER PRIMARY KEY,
+        current_vote_length INTEGER DEFAULT 30
+    """
+
+    CORPORATE_VOTES_SCHEMA = """
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        option_a TEXT,
+        option_b TEXT,
+        votes_a INTEGER DEFAULT 0,
+        votes_b INTEGER DEFAULT 0,
+        expires_at REAL,
+        resolved INTEGER DEFAULT 0
+    """
+
+    VOTE_RECORDS_SCHEMA = """
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        vote_id INTEGER,
+        user_id TEXT,
+        choice TEXT,
+        FOREIGN KEY(vote_id) REFERENCES corporate_votes(id),
+        FOREIGN KEY(user_id) REFERENCES users(user_id)
+    """
+
     sync_table_schema(conn, "resources", RESOURCES_SCHEMA)
     sync_table_schema(conn, "users", USERS_SCHEMA)
     sync_table_schema(conn, "inventory", INVENTORY_SCHEMA)
     sync_table_schema(conn, "activity_logs", ACTIVITY_LOGS)
+    sync_table_schema(conn, "system", SYSTEM_SCHEMA)
+    sync_table_schema(conn, "corporate_votes", CORPORATE_VOTES_SCHEMA)
+    sync_table_schema(conn, "vote_records", VOTE_RECORDS_SCHEMA)
 
-    # Standard Price History (doesn't change often, but keep it simple)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS price_history (
             resource_name TEXT, price REAL, timestamp REAL
         )
     """)
 
-    # --- UPSERT DATA ---
-    # Use INSERT OR IGNORE so we don't duplicate data on every restart
+    conn.execute("""
+        INSERT OR IGNORE INTO system (id, current_vote_length) VALUES (1, ?)
+    """, (COORPRATE_VOTE_LENGTH,))
+
     conn.execute("""
         INSERT OR IGNORE INTO users 
         (user_id, balance, max_workforce, workers_extraction, workers_rnd, workers_espionage) 
@@ -949,10 +1268,10 @@ if __name__ == "__main__":
     for m in MATERIALS:
         conn.execute("INSERT OR IGNORE INTO resources VALUES (?, ?, ?, ?, ?, ?, ?, ?)", m)
 
-    update_resource_demand(cursor=conn.cursor(), resource_name="Iron", add_demand=100)
-
     conn.commit()
     conn.close()
 
     threading.Thread(target=market_loop, daemon=True).start()
+    threading.Thread(target=corporate_vote_loop, daemon=True).start()
+
     app.run(host='0.0.0.0', port=5000, debug=True, use_reloader=False)

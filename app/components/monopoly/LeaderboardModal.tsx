@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { FormattedValue } from './FormattedValue';
 
 interface LeaderboardEntry {
   rank: number;
@@ -14,10 +15,32 @@ interface LeaderboardModalProps {
   isOpen: boolean;
   onClose: () => void;
   data: LeaderboardEntry[];
-  formatCurrency: (val: number) => string;
+  updateLeaderboard: () => void;
 }
 
-export const LeaderboardModal = ({ isOpen, onClose, data, formatCurrency }: LeaderboardModalProps) => {
+export const LeaderboardModal = ({ isOpen, onClose, data, updateLeaderboard }: LeaderboardModalProps) => {
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout;
+
+    if (isOpen) {
+      // 1. Initial call to refresh data immediately when opened
+      updateLeaderboard();
+
+      // 2. Set up the 10-second interval
+      intervalId = setInterval(() => {
+        updateLeaderboard();
+      }, 10000);
+    }
+
+    // 3. Cleanup function: stops the timer when isOpen changes to false 
+    // or the component is removed from the DOM
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [isOpen, updateLeaderboard]);
+  
   return (
     <AnimatePresence>
       {isOpen && (
@@ -80,7 +103,7 @@ export const LeaderboardModal = ({ isOpen, onClose, data, formatCurrency }: Lead
                       {typeof player.inventory === 'object' ? (
                         Object.entries(player.inventory).map(([res, amt]) => (
                           <span key={res} className="text-[8px] bg-slate-950 px-1 border border-slate-800 text-slate-500 rounded-xs">
-                            {res[0]}:{amt}
+                            {res}:{amt}
                           </span>
                         ))
                       ) : (
@@ -90,11 +113,11 @@ export const LeaderboardModal = ({ isOpen, onClose, data, formatCurrency }: Lead
                   </div>
 
                   <div className="col-span-3 text-right tabular-nums text-[11px] text-slate-400">
-                    {formatCurrency(player.balance)}
+                    <FormattedValue value={player.balance} type="currency" prefix="$" />
                   </div>
 
                   <div className="col-span-4 text-right tabular-nums text-[12px] font-bold text-emerald-400">
-                    {formatCurrency(player.net_worth)}
+                    <FormattedValue value={player.net_worth} type="currency" prefix="$" />
                   </div>
                 </div>
               ))}

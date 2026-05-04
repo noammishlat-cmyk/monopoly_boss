@@ -12,16 +12,15 @@ import { Notification } from '../components/monopoly/Notification';
 import { VotingPanel, VoteChoice } from '../components/monopoly/VotingPanel';
 
 export default function MonopolyBoss() {
-  const UserID = "user123";
-
   const { 
+    userId,
     userData,
     gameData, 
     selectedItem, 
     setSelectedItem,
-    secondsRemaining, 
+    tickSecondsRemaining, 
+    voteSecondsRemaining,
     tickInterval, 
-    formatCurrency,
     handleTrade,
     tradeAmounts,
     setTradeAmounts,
@@ -40,8 +39,11 @@ export default function MonopolyBoss() {
     currentTax,
     userLog,
     currentDeploymentTickLength,
-    leaderboard
-  } = useGameState(UserID);
+    leaderboard,
+    fetchLeaderboard,
+    selectedTarget,
+    setSelectedTarget
+  } = useGameState();
 
   const [activeTab, setActiveTab] = useState('workforce');
 
@@ -77,13 +79,13 @@ export default function MonopolyBoss() {
     <div className="min-h-screen bg-slate-950 text-slate-200 p-4 font-mono pb-32 lg:pb-4">
       {/* 1. TOP NAVIGATION & STATUS */}
       <Header 
-        leaderboard={leaderboard}
-        userId={UserID}
+        leaderboard={leaderboard ?? []}
+        userId={userId}
         balance={userData.balance}
         totalAssets={netWorth}
         tickInterval={tickInterval}
-        secondsRemaining={secondsRemaining}
-        formatCurrency={formatCurrency}
+        secondsRemaining={tickSecondsRemaining}
+        loadLeaderboard={fetchLeaderboard}
       />
 
       {/* --- MOBILE TAB NAVIGATION --- */}
@@ -108,17 +110,23 @@ export default function MonopolyBoss() {
         {/* 2. LEFT COLUMN: UNIT MANAGEMENT */}
         <section className={`lg:col-span-4 ${activeTab === 'workforce' ? 'block' : 'hidden lg:block'}`}>
           <WorkforceCommand 
+            currentUserId={userId}
             isPendingReturn={isPendingReturn}
             availableUnits={availableUnits}
             maxWorkforce={userData.max_workforce}
             allocation={allocation}
             onAllocationChange={handleAllocationChange}
+            
+            selectedTarget={selectedTarget}
+            onTargetChange={setSelectedTarget}
+            
             onDeploy={deployWorkforce}
             deploymentTickLength={currentDeploymentTickLength}
             lastDeployment={lastDeployment}
-            secondsRemaining={secondsRemaining}
+            secondsRemaining={tickSecondsRemaining}
             maxSendSabotage={maxSendSabotageRisk}
             maxSabotageRisk={maxSabotageRisk}
+            leaderboard={leaderboard ?? []}
           />
         </section>
         
@@ -140,6 +148,8 @@ export default function MonopolyBoss() {
             history={gameData.history[selectedItem] || []} 
             selectedItem={selectedItem}
             isLoading={isHistoryLoading}
+            currentTax={currentTax}
+            basePrice={gameData.market.find(m => m.name === selectedItem)?.base_price ?? 0}
           />
         </section>
 
@@ -149,10 +159,9 @@ export default function MonopolyBoss() {
           <VotingPanel 
             prompt="Proposed Regulatory Modification: Corporate Tax Policy"
             choices={choices}
-            secondsRemaining={secondsRemaining} // Syncing with global game tick
+            secondsRemaining={voteSecondsRemaining}
             playerBalance={userData.balance}
             onCastVote={handleCastVote}
-            formatCurrency={formatCurrency}
           />
 
           <div className="flex-1">
