@@ -3,11 +3,9 @@
 import React, { useState, useEffect } from 'react';
 import { LoginPage } from './components/LoginPage';
 import { useRouter } from 'next/navigation';
-import { useGameState } from './hooks/useGameState';
 
 export default function MonopolyBoss() {
   const router = useRouter();
-  const { setUserId } = useGameState();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -19,7 +17,7 @@ export default function MonopolyBoss() {
   }, [isAuthenticated, router]);
 
   const handleLogin = (id: string) => {
-    setUserId(id);
+    // setUserId(id);
     setIsLoading(true); // Start loading
     
     setTimeout(() => {
