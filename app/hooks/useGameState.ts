@@ -46,10 +46,24 @@ interface LeaderboardEntry {
   inventory: Record<string, number> | "Hidden";
 }
 
+type VoteChoice = {
+  id: string;
+  label: string;
+  votes: number;
+};
+
+type ActiveVote = {
+  active: boolean;
+  vote_id: number | null;
+  choices: VoteChoice[];
+  expires_at: number;
+};
+
+
 export function useGameState() {
   const BACKEND_ADRESS = "http://192.168.1.246:5000"
 
-  const [userId, setUserId] = useState("user123");
+  const [userId, setUserId] = useState("test_user321");
 
   // 1. Core State
   const [userData, setUserData] = useState<UserData>({
@@ -82,6 +96,14 @@ export function useGameState() {
   const [currentTax, setCurrentTax] = useState(0.05);
 
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>()
+
+  const [activeVote, setActiveVote] = useState<ActiveVote>({
+    active: false,
+    vote_id: null,
+    choices: [],
+    expires_at: 0,
+  });
+
 
   useEffect(() => {
     if (error) {
@@ -185,6 +207,35 @@ export function useGameState() {
     }
   }, []);
 
+  const fetchActiveVote = useCallback(async () => {
+    try {
+      const res = await fetch(`${BACKEND_ADRESS}/api/vote/current`);
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+
+      if (!data.active) {
+        setActiveVote({ active: false, vote_id: null, choices: [], expires_at: 0 });
+        return;
+      }
+
+      // Normalize the 3 options into a choices array so the component
+      // doesn't need to know about option_a/b/c naming
+      setActiveVote({
+        active: true,
+        vote_id: data.vote_id,
+        expires_at: data.expires_at,
+        choices: [
+          { id: 'a', label: data.option_a, votes: data.votes_a },
+          { id: 'b', label: data.option_b, votes: data.votes_b },
+          { id: 'c', label: data.option_c, votes: data.votes_c },
+        ],
+      });
+    } catch {
+      setError("Vote sync error");
+    }
+  }, []);
+
+
   const fetchLeaderboard = useCallback(async () => {
     try {
       const url = `${BACKEND_ADRESS}/api/leaderboard`;
@@ -252,7 +303,7 @@ export function useGameState() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            user_id: 'user123',
+            user_id: userId,
             extraction: sentWorkers.extraction,
             rnd: sentWorkers.rnd,
             espionage: sentWorkers.espionage,
@@ -299,11 +350,54 @@ export function useGameState() {
     setAllocation({ extraction: 0, rnd: 0, espionage: 0 });
   };
 
+  const castVote = useCallback(async (choiceId: string, amount: number) => {
+    if (!activeVote.vote_id || amount <= 0) return;
+
+    try {
+      const res = await fetch(`${BACKEND_ADRESS}/api/vote/cast`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userId,
+          vote_id: activeVote.vote_id,
+          choice: choiceId,
+          amount,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+
+        // Update vote tallies directly from the response — no extra fetch needed
+        setActiveVote(prev => ({
+          ...prev,
+          choices: [
+            { id: 'a', label: data.option_a, votes: data.votes_a },
+            { id: 'b', label: data.option_b, votes: data.votes_b },
+            { id: 'c', label: data.option_c, votes: data.votes_c },
+          ],
+        }));
+
+        // Deduct balance locally for instant feedback before next poll
+        setUserData(prev => ({ ...prev, balance: prev.balance - amount }));
+
+      } else {
+        const err = await res.json();
+        setError(err.error);
+      }
+    } catch {
+      setError("Vote cast failed");
+    }
+  }, [activeVote.vote_id, userId]);
+
+
+
   // The Heartbeat (Countdown & Polling)[cite: 1]
   useEffect(() => {
     Promise.resolve().then(() => {
       refreshUserData(true);
       refreshPricingData(true);
+      fetchActiveVote();
     });
 
     const heartbeat = setInterval(() => {
@@ -320,10 +414,14 @@ export function useGameState() {
             setIsPendingReturn(false);
           }, 1500);
         }
+        if (diff_vote <= 0 && nextCoorprateVote > 0) {
+          setTimeout(() => fetchActiveVote(), 1500);
+        }
       }
       pollCounter.current += 1;
       if (pollCounter.current >= 5) {
         refreshUserData();
+        fetchActiveVote();
         pollCounter.current = 0;
       }
     }, 1000);
@@ -365,6 +463,9 @@ export function useGameState() {
     setUserId,
     nextCoorprateVote,
     selectedTarget,
-    setSelectedTarget
+    setSelectedTarget,
+    activeVote,
+    castVote,
+    fetchActiveVote,
   };
 }

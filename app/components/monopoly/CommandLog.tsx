@@ -37,9 +37,6 @@ export const CommandLog = ({ marketLength, selectedItem, current_log, error }: C
             </p>
           ))}
 
-          <p className="text-blue-500">
-            [{mountedTime || "--:--:--"}] Monitoring focus: {selectedItem}
-          </p>
           <p className="text-emerald-900 font-bold mb-2">SYSTEM_BOOT_SUCCESSFUL...</p>
       </div>
     </div>

@@ -9,7 +9,7 @@ from datetime import datetime
 
 # --- CONFIGURATION ---
 TICK_INTERVAL = 60.0
-VOTE_INTERVAL = 3600.0
+VOTE_INTERVAL = 60.0 * 60 # An hour
 
 MARKET_DECAY_RATE = 0.05
 HISTORY_RETAIN_TIME = 1800  # 30 minutes in seconds
@@ -19,10 +19,20 @@ SABOTAGE_MAX_DETECTION_PRECENT = 40
 SABOTAGE_MAX_DETECTION_SEND = 10
 SABOTAGE_CHANCE_OF_DEATH = 20
 WORKFORCE_RETURN_TIME = 1   # In Ticks
-SHOW_INVENTORY_IN_LEADERBOARD = 1
+SHOW_INVENTORY_IN_LEADERBOARD = 0
 COORPRATE_VOTE_LENGTH = 30
 
-# --- FIX 1: Per-rarity equilibrium levels ---
+MATERIALS = [
+    #  Name    | Price | Change | Supply | Demand | Updated |  Base   | Rarity Index
+    ('Wood'    , 20.0,    0.0,    60000,   60000,      0,        20.0,        1),
+    ('Iron'    , 100.0,   0.0,    30000,   30000,      0,       100.0,        2),
+    ('Copper'  , 300.0,   0.0,    30000,   30000,      0,       300.0,        2),
+    ('Gold'    , 500.0,   0.0,    12000,   12000,      0,       500.0,        3),
+    ('Oil'     , 700.0,   0.0,     5000,    5000,      0,       700.0,        4),
+    ('Lithium' , 1200.0,  0.0,     5000,    5000,      0,      1200.0,        4),
+    ('Silicon' , 2500.0,  0.0,     5000,    5000,      0,      2500.0,        4),
+    ('Diamond' , 20000.0, 0.0,      800,     800,      0,     20000.0,        5),
+]
 # Instead of one global EQUILIBRIUM_LEVEL = 200 for all resources,
 # each rarity tier has its own natural resting supply/demand.
 # This prevents Diamond (1000 units) from being pulled toward the same
@@ -42,44 +52,31 @@ MOMENTUM_WINDOW = 5
 
 
 CORPORATE_CHANGES_OPTIONS = [
-    "Corporate Tax Policy + 0.05% to tax during selling. (Capped at 3%)",
-    "Corporate Tax Policy - 0.05% to tax during selling. (Capped at 0.03%)",
-    "Corporate Tax Policy + 0.07% to tax during selling. (Capped at 3%)",
-    "Corporate Tax Policy - 0.07% to tax during selling. (Capped at 0.03%)",
-    "Corporate Tax Policy + 0.02% to tax during selling. (Capped at 3%)",
-    "Corporate Tax Policy - 0.02% to tax during selling. (Capped at 0.03%)",
+    "Corporate Tax Policy | +0.05% to tax during selling. (Capped at 3%)",
+    "Corporate Tax Policy | -0.05% to tax during selling. (Capped at 0.03%)",
+    "Corporate Tax Policy | +0.07% to tax during selling. (Capped at 3%)",
+    "Corporate Tax Policy | -0.07% to tax during selling. (Capped at 0.03%)",
+    "Corporate Tax Policy | +0.02% to tax during selling. (Capped at 3%)",
+    "Corporate Tax Policy | -0.02% to tax during selling. (Capped at 0.03%)",
 
-    "Recruiting Overhaul - Unemployment - Increase chance for recruiting.",
-    "Recruiting Overhaul - Tough Market - Decrease chance for recruiting.",
+    "Recruiting Overhaul | Unemployment - Increase chance for recruiting.",
+    "Recruiting Overhaul | Tough Market - Decrease chance for recruiting.",
 
-    "Global Security Crisis - Increase success chance for sabotage.",
-    "Global Security Upgrades - Decrease success chance for sabotage.",
-    "Global Security Crisis - Decrease chance of death during sabotage.",
-    "Global Security Upgrades - Increase chance of death during sabotage.",
+    "Global Security Crisis | Increase success chance for sabotage.",
+    "Global Security Upgrades | Decrease success chance for sabotage.",
+    "Global Security Crisis | Decrease chance of death during sabotage.",
+    "Global Security Upgrades | Increase chance of death during sabotage.",
 
-    "Area Contaminated - Global return time for workers has increased.",
-    "New Area Found - Global return time for workers has decreased.",
+    "Area Contaminated | Global return time for workers has increased.",
+    "New Area Found | Global return time for workers has decreased.",
 
-    "Value Crisis - Element $element_name has increased in value.",
-    "Value Overhaul - Element $element_name has decreased in value.",
+    "Value Crisis | Elements `$element_name1, $element_name2, $element_name3` has increased in value.",
+    "Value Overhaul | Elements `$element_name1, $element_name2, $element_name3` has decreased in value.",
 
-    "Value Crisis - Element $element_name has increased in demand.",
-    "Value Overhaul - Element $element_name has decreased in demand.",
+    "Value Crisis | Elements `$element_name1, $element_name2, $element_name3` has increased in demand.",
+    "Value Overhaul | Elements `$element_name1, $element_name2, $element_name3` has decreased in demand.",
 
-    "Public Report - See the resources of top 10 players in leaderboard",
-]
-
-
-MATERIALS = [
-    #  Name    | Price | Change | Supply | Demand | Updated |  Base   | Rarity Index
-    ('Wood'    , 20.0,    0.0,    90000,   90000,      0,        20.0,        1),
-    ('Iron'    , 100.0,   0.0,    70000,   70000,      0,       100.0,        2),
-    ('Copper'  , 300.0,   0.0,    70000,   70000,      0,       300.0,        2),
-    ('Gold'    , 500.0,   0.0,    50000,   50000,      0,       500.0,        3),
-    ('Oil'     , 700.0,   0.0,    20000,   20000,      0,       700.0,        4),
-    ('Lithium' , 1200.0,  0.0,    18000,   18000,      0,      1200.0,        4),
-    ('Silicon' , 2500.0,  0.0,    12000,    12000,      0,      2500.0,        4),
-    ('Diamond' , 20000.0, 0.0,     1000,    1000,      0,     20000.0,        5),
+    "Public Report | See the resources of top 10 players in leaderboard",
 ]
 
 app = Flask(__name__)
@@ -240,7 +237,7 @@ def deploy_workers(u_id):
             workers_extraction = ?, 
             workers_rnd = ?, 
             workers_espionage = ?,
-            espionage_taget = ?
+            espionage_taget = ?,
             workforce_deployment_length = ?
             WHERE user_id = ?
         """, (ext, rnd, esp, target, WORKFORCE_RETURN_TIME, u_id))
@@ -369,24 +366,21 @@ def get_current_vote():
     cursor = conn.cursor()
     try:
         cursor.execute("""
-            SELECT id, option_a, option_b, votes_a, votes_b, expires_at
+            SELECT id, option_a, option_b, option_c, votes_a, votes_b, votes_c, expires_at
             FROM corporate_votes
             WHERE expires_at > ?
             ORDER BY expires_at DESC LIMIT 1
         """, (time.time(),))
         row = cursor.fetchone()
-
         if not row:
             return jsonify({"active": False}), 200
 
-        vote_id, opt_a, opt_b, votes_a, votes_b, expires_at = row
+        vote_id, opt_a, opt_b, opt_c, votes_a, votes_b, votes_c, expires_at = row
         return jsonify({
             "active": True,
             "vote_id": vote_id,
-            "option_a": opt_a,
-            "option_b": opt_b,
-            "votes_a": votes_a,
-            "votes_b": votes_b,
+            "option_a": opt_a, "option_b": opt_b, "option_c": opt_c,
+            "votes_a": votes_a, "votes_b": votes_b, "votes_c": votes_c,
             "expires_at": expires_at,
             "server_time": time.time()
         }), 200
@@ -396,16 +390,13 @@ def get_current_vote():
 
 @app.route('/api/vote/cast', methods=['POST'])
 def cast_vote():
-    """
-    Let a user vote on the active corporate proposal.
-    Body: { "user_id": "...", "vote_id": 1, "choice": "a" or "b" }
-    """
     data = request.get_json()
     u_id = data.get('user_id', '')
     vote_id = data.get('vote_id')
     choice = data.get('choice', '').lower()
+    amount = float(data.get('amount', 0))
 
-    if not u_id or not vote_id or choice not in ('a', 'b'):
+    if not u_id or not vote_id or choice not in ('a', 'b', 'c') or amount <= 0:
         return jsonify({"error": "Invalid request"}), 400
 
     conn = sqlite3.connect('market.db')
@@ -417,22 +408,41 @@ def cast_vote():
         if not row or row[0] < time.time():
             return jsonify({"error": "Vote has expired or does not exist"}), 400
 
-        # Prevent double voting
-        cursor.execute("""
-            SELECT 1 FROM vote_records WHERE vote_id = ? AND user_id = ?
-        """, (vote_id, u_id))
-        if cursor.fetchone():
-            return jsonify({"error": "Already voted"}), 400
+        # Check user has enough balance
+        cursor.execute("SELECT balance FROM users WHERE user_id = ?", (u_id,))
+        balance_row = cursor.fetchone()
+        if not balance_row or balance_row[0] < amount:
+            return jsonify({"error": "Insufficient funds"}), 400
 
-        # Record the vote
-        col = "votes_a" if choice == 'a' else "votes_b"
-        cursor.execute(f"UPDATE corporate_votes SET {col} = {col} + 1 WHERE id = ?", (vote_id,))
+        # Deduct from user balance
+        cursor.execute("UPDATE users SET balance = balance - ? WHERE user_id = ?", (amount, u_id))
+
+        # Add amount to the chosen option's pool
+        col = {"a": "votes_a", "b": "votes_b", "c": "votes_c"}[choice]
+        cursor.execute(f"UPDATE corporate_votes SET {col} = {col} + ? WHERE id = ?", (amount, vote_id))
+
+        # Record the contribution (no uniqueness constraint — same user can top up)
         cursor.execute("""
-            INSERT INTO vote_records (vote_id, user_id, choice) VALUES (?, ?, ?)
-        """, (vote_id, u_id, choice))
+            INSERT INTO vote_records (vote_id, user_id, choice, amount)
+            VALUES (?, ?, ?, ?)
+        """, (vote_id, u_id, choice, amount))
 
         conn.commit()
-        return jsonify({"message": "Vote cast successfully"}), 200
+
+        # Return updated vote state so frontend can refresh immediately
+        cursor.execute("""
+            SELECT option_a, option_b, option_c, votes_a, votes_b, votes_c, expires_at
+            FROM corporate_votes WHERE id = ?
+        """, (vote_id,))
+        v = cursor.fetchone()
+        return jsonify({
+            "message": "Vote cast successfully",
+            "vote_id": vote_id,
+            "option_a": v[0], "option_b": v[1], "option_c": v[2],
+            "votes_a": v[3], "votes_b": v[4], "votes_c": v[5],
+            "expires_at": v[6],
+        }), 200
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
@@ -674,7 +684,7 @@ def handle_workers_done(cursor: sqlite3.Cursor):
                 workers_extraction = 0, 
                 workers_rnd = 0, 
                 workers_espionage = 0,
-                workers_espionage = RANDOM
+                espionage_taget = 'RANDOM'
             WHERE user_id = ?
         """, (u_id,))
 
@@ -925,63 +935,73 @@ def sabotage_reward(cursor, user_id, target_id, sabo_count):
 # --- CORPORATE VOTE LOGIC ---
 
 def create_new_vote(cursor: sqlite3.Cursor):
-    """
-    FIX 5: Fully wired corporate vote system.
-    Picks two random proposals, creates a vote that expires after VOTE_INTERVAL seconds.
-    Called once per hour by the vote loop.
-    """
-    options = random.sample(CORPORATE_CHANGES_OPTIONS, 2)
-    expires_at = time.time() + VOTE_INTERVAL
+    options = random.sample(CORPORATE_CHANGES_OPTIONS, 3)
+
+    cursor.execute("SELECT name FROM resources ORDER BY RANDOM()")
+    all_resources = [row[0] for row in cursor.fetchall()]
+    resource_pool = iter(all_resources)
+
+    resolved_options = []
+    for opt in options:
+        import re
+        placeholders = re.findall(r'\$element_name\d*', opt)
+        for placeholder in placeholders:
+            resource = next(resource_pool, "Unknown")
+            opt = opt.replace(placeholder, resource, 1)
+        resolved_options.append(opt)
+
+    # Align expiry to the next clock boundary so the vote loop resolves it
+    # exactly on time instead of one full interval late
+    now = time.time()
+    expires_at = now + (VOTE_INTERVAL - (now % VOTE_INTERVAL))
+
     cursor.execute("""
-        INSERT INTO corporate_votes (option_a, option_b, votes_a, votes_b, expires_at)
-        VALUES (?, ?, 0, 0, ?)
-    """, (options[0], options[1], expires_at))
+        INSERT INTO corporate_votes (option_a, option_b, option_c, votes_a, votes_b, votes_c, expires_at)
+        VALUES (?, ?, ?, 0, 0, 0, ?)
+    """, (resolved_options[0], resolved_options[1], resolved_options[2], expires_at))
     vote_id = cursor.lastrowid
     print(f"[VOTE] New corporate vote #{vote_id} created. Expires at {time.strftime('%H:%M:%S', time.localtime(expires_at))}")
-    print(f"  A: {options[0]}")
-    print(f"  B: {options[1]}")
+    print(f"  A: {resolved_options[0]}\n  B: {resolved_options[1]}\n  C: {resolved_options[2]}")
     return vote_id
 
 
 def apply_vote_result(cursor: sqlite3.Cursor, vote_id: int):
-    """
-    Reads the winning option from a completed vote and applies its effect.
-    """
     global CURRENT_TAX, RECRUITING_CHANCE, SABOTAGE_MAX_DETECTION_PRECENT
     global SABOTAGE_MAX_DETECTION_SEND, SABOTAGE_CHANCE_OF_DEATH, WORKFORCE_RETURN_TIME
     global SHOW_INVENTORY_IN_LEADERBOARD
 
     cursor.execute("""
-        SELECT option_a, option_b, votes_a, votes_b
+        SELECT option_a, option_b, option_c, votes_a, votes_b, votes_c
         FROM corporate_votes WHERE id = ?
     """, (vote_id,))
     row = cursor.fetchone()
     if not row:
         return
 
-    opt_a, opt_b, votes_a, votes_b = row
+    opt_a, opt_b, opt_c, votes_a, votes_b, votes_c = row
 
-    # Tiebreaker: random
-    if votes_a >= votes_b:
-        winner = opt_a
-    else:
-        winner = opt_b
+    winner = max(
+        [("a", opt_a, votes_a), ("b", opt_b, votes_b), ("c", opt_c, votes_c)],
+        key=lambda x: (x[2], random.random())
+    )[1]
 
-    print(f"[VOTE] Vote #{vote_id} resolved. Winner: '{winner}' ({votes_a} vs {votes_b})")
+    print(f"[VOTE] Vote #{vote_id} resolved. Winner: '{winner}'")
 
-    # --- Apply the effect based on which option won ---
-    if "Tax Policy + 0.05" in winner:
-        CURRENT_TAX = min(CURRENT_TAX + 0.0005, 0.03)
-    elif "Tax Policy - 0.05" in winner:
-        CURRENT_TAX = max(CURRENT_TAX - 0.0005, 0.0003)
-    elif "Tax Policy + 0.07" in winner:
-        CURRENT_TAX = min(CURRENT_TAX + 0.0007, 0.03)
-    elif "Tax Policy - 0.07" in winner:
-        CURRENT_TAX = max(CURRENT_TAX - 0.0007, 0.0003)
-    elif "Tax Policy + 0.02" in winner:
-        CURRENT_TAX = min(CURRENT_TAX + 0.0002, 0.03)
-    elif "Tax Policy - 0.02" in winner:
-        CURRENT_TAX = max(CURRENT_TAX - 0.0002, 0.0003)
+    # Reset leaderboard visibility every cycle — only Public Report turns it on
+    SHOW_INVENTORY_IN_LEADERBOARD = 1
+
+    if "Tax Policy | +0.05" in winner:
+        CURRENT_TAX = min(CURRENT_TAX + 0.05, 0.3)
+    elif "Tax Policy | -0.05" in winner:
+        CURRENT_TAX = max(CURRENT_TAX - 0.05, 0.03)
+    elif "Tax Policy | +0.07" in winner:
+        CURRENT_TAX = min(CURRENT_TAX + 0.07, 0.3)
+    elif "Tax Policy | -0.07" in winner:
+        CURRENT_TAX = max(CURRENT_TAX - 0.07, 0.03)
+    elif "Tax Policy | +0.02" in winner:
+        CURRENT_TAX = min(CURRENT_TAX + 0.02, 0.3)
+    elif "Tax Policy | -0.02" in winner:
+        CURRENT_TAX = max(CURRENT_TAX - 0.02, 0.03)
 
     elif "Unemployment" in winner:
         RECRUITING_CHANCE = min(RECRUITING_CHANCE + 5, 50)
@@ -1005,29 +1025,28 @@ def apply_vote_result(cursor: sqlite3.Cursor, vote_id: int):
     elif "Public Report" in winner:
         SHOW_INVENTORY_IN_LEADERBOARD = 10
 
-    elif "$element_name" in winner:
-        # Pick a random resource for the element-specific votes
-        cursor.execute("SELECT name, base_price FROM resources ORDER BY RANDOM() LIMIT 1")
-        res = cursor.fetchone()
-        if res:
-            res_name, base_price = res
+    elif "increased in value" in winner or "decreased in value" in winner or \
+         "increased in demand" in winner or "decreased in demand" in winner:
+        cursor.execute("SELECT name, base_price FROM resources")
+        all_res = {row[0]: row[1] for row in cursor.fetchall()}
+        res_names = [name for name in all_res if name in winner]
+        for res_name in res_names:
+            base_price = all_res[res_name]
             if "increased in value" in winner:
-                update_resource_base_price(cursor, res_name, base_price * 1.20)
+                update_resource_base_price(cursor, res_name, base_price * random.uniform(0.7, 1.3))
             elif "decreased in value" in winner:
-                update_resource_base_price(cursor, res_name, base_price * 0.80)
+                update_resource_base_price(cursor, res_name, base_price * random.uniform(0.7, 1.3))
             elif "increased in demand" in winner:
-                update_resource_demand(cursor, res_name, base_price * 0.10)
+                update_resource_demand(cursor, res_name, +random.uniform(0.5, 1.0))
             elif "decreased in demand" in winner:
-                update_resource_demand(cursor, res_name, -(base_price * 0.10))
-            winner = winner.replace("$element_name", res_name)
+                update_resource_demand(cursor, res_name, -random.uniform(0.5, 1.0))
 
-    # Broadcast to all users as a system log
+    # Broadcast result to all users
     cursor.execute("SELECT user_id FROM users")
-    all_users = cursor.fetchall()
-    for (uid,) in all_users:
+    for (uid,) in cursor.fetchall():
         add_log(cursor, f"[Corporate] New policy enacted: {winner}", uid, "SYSTEM")
 
-    print(f"[VOTE] Effect applied. CURRENT_TAX={CURRENT_TAX:.4f} RECRUITING_CHANCE={RECRUITING_CHANCE}")
+    print(f"[VOTE] Effect applied. TAX={CURRENT_TAX:.4f} RECRUITING={RECRUITING_CHANCE}")
 
 
 # --- RESOURCE HELPERS ---
@@ -1036,25 +1055,49 @@ def update_resource_base_price(cursor, resource_name, new_base_price):
     try:
         cursor.execute("""
             UPDATE resources 
-            SET last_change = ? - base_price, base_price = ?, price = (price - base_price) + ?
+            SET base_price = ?,
+                price = ?,
+                last_change = 0
             WHERE name = ?
-        """, (new_base_price, new_base_price, new_base_price, resource_name.capitalize()))
+        """, (new_base_price, new_base_price, resource_name.capitalize()))
+        print(f"Base price for {resource_name} set to {new_base_price:.2f}")
         return True
     except Exception as e:
         print(f"Error updating base price: {e}")
         return False
 
 
-def update_resource_demand(cursor: sqlite3.Cursor, resource_name: str, add_demand: float):
+
+def update_resource_demand(cursor: sqlite3.Cursor, resource_name: str, direction: float):
     try:
+        cursor.execute("SELECT rarity_index FROM resources WHERE name = ?", (resource_name.capitalize(),))
+        row = cursor.fetchone()
+        if not row:
+            return False
+
+        rarity = row[0]
+        equilibrium = EQUILIBRIUM_BY_RARITY[rarity]
+
+        # Subtle: 5% to 15% of equilibrium instead of 30-50%
+        # This gives a noticeable but not market-breaking push
+        # At MARKET_DECAY_RATE=0.05 this still takes ~5-8 ticks to fully decay
+        impact = equilibrium * random.uniform(0.05, 0.15) * direction
+
+        floor   = equilibrium * 0.25
+        ceiling = equilibrium * 2.00
+
         cursor.execute("""
-            UPDATE resources SET demand = demand + ? WHERE name = ?
-        """, (add_demand, resource_name.capitalize()))
-        print(f"Added {add_demand} demand to {resource_name}")
+            UPDATE resources 
+            SET demand = MAX(?, MIN(?, demand + ?))
+            WHERE name = ?
+        """, (floor, ceiling, impact, resource_name.capitalize()))
+
+        print(f"Demand shock on {resource_name}: {impact:+.0f} (eq={equilibrium})")
         return True
     except Exception as e:
         print(f"Error updating demand: {e}")
         return False
+
 
 
 # --- BACKGROUND LOOPS ---
@@ -1067,12 +1110,6 @@ def market_loop():
 
 
 def corporate_vote_loop():
-    """
-    FIX 5: Corporate vote loop is now fully implemented.
-    Every VOTE_INTERVAL seconds:
-      1. Resolve the previous vote (apply its effect)
-      2. Create a new vote for the next period
-    """
     while True:
         now = time.time()
         time.sleep(VOTE_INTERVAL - (now % VOTE_INTERVAL))
@@ -1080,7 +1117,7 @@ def corporate_vote_loop():
         conn = sqlite3.connect('market.db')
         cursor = conn.cursor()
         try:
-            # 1. Find and resolve any expired unresolved votes
+            # 1. Resolve expired votes
             cursor.execute("""
                 SELECT id FROM corporate_votes
                 WHERE expires_at <= ? AND resolved = 0
@@ -1092,8 +1129,14 @@ def corporate_vote_loop():
                 apply_vote_result(cursor, vote_id)
                 cursor.execute("UPDATE corporate_votes SET resolved = 1 WHERE id = ?", (vote_id,))
 
-            # 2. Create the next vote
-            create_new_vote(cursor)
+            # 2. Only create a new vote if there isn't already an active one
+            # This prevents double-creation when startup already made one
+            cursor.execute("""
+                SELECT id FROM corporate_votes 
+                WHERE expires_at > ? AND resolved = 0 LIMIT 1
+            """, (time.time(),))
+            if not cursor.fetchone():
+                create_new_vote(cursor)
 
             conn.commit()
         except Exception as e:
@@ -1220,8 +1263,10 @@ if __name__ == "__main__":
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         option_a TEXT,
         option_b TEXT,
-        votes_a INTEGER DEFAULT 0,
-        votes_b INTEGER DEFAULT 0,
+        option_c TEXT,
+        votes_a REAL DEFAULT 0,
+        votes_b REAL DEFAULT 0,
+        votes_c REAL DEFAULT 0,
         expires_at REAL,
         resolved INTEGER DEFAULT 0
     """
@@ -1231,6 +1276,7 @@ if __name__ == "__main__":
         vote_id INTEGER,
         user_id TEXT,
         choice TEXT,
+        amount REAL DEFAULT 0,
         FOREIGN KEY(vote_id) REFERENCES corporate_votes(id),
         FOREIGN KEY(user_id) REFERENCES users(user_id)
     """
@@ -1267,6 +1313,13 @@ if __name__ == "__main__":
 
     for m in MATERIALS:
         conn.execute("INSERT OR IGNORE INTO resources VALUES (?, ?, ?, ?, ?, ?, ?, ?)", m)
+
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM corporate_votes WHERE expires_at > ? AND resolved = 0 LIMIT 1", (time.time(),))
+    if not cursor.fetchone():
+        create_new_vote(cursor)
+        print("[INIT] No active vote found — created initial vote.")
+
 
     conn.commit()
     conn.close()

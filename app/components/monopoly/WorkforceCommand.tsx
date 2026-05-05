@@ -1,5 +1,6 @@
-import React, {useState, useEffect} from 'react';
+import React, { useState } from 'react';
 import { Users, Pickaxe, Cpu, Crosshair, ChevronDown, Skull } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion'; // 1. Import Framer Motion
 import { DeptInfo } from './DeptInfoHelper';
 
 type WorkerTypes = {
@@ -66,6 +67,28 @@ export const WorkforceCommand = ({
   // --- NEW: derived target data ---
   const targets = leaderboard.filter(e => e.user_id !== currentUserId);
   const selectedEntry = targets.find(e => e.user_id === selectedTarget) ?? null;
+
+  const containerVariants = {
+    hidden: { height: 0, opacity: 0, marginTop: 0 },
+    visible: { 
+      height: 'auto', 
+      opacity: 1, 
+      marginTop: 12,
+      transition: { height: { duration: 0.3 }, opacity: { duration: 0.2, delay: 0.1 } } 
+    },
+    exit: { height: 0, opacity: 0, marginTop: 0, transition: { duration: 0.2 } }
+  };
+
+  const dropdownVariants = {
+    hidden: { opacity: 0, y: -10, scale: 0.95 },
+    visible: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.2 } },
+    exit: { opacity: 0, y: -10, scale: 0.95, transition: { duration: 0.1 } }
+  };
+
+  const cardVariants = {
+    hidden: { opacity: 0, scale: 0.9 },
+    visible: { opacity: 1, scale: 1, transition: { type: 'spring', damping: 15, stiffness: 300 } }
+  };
 
   if (isPendingReturn) {
     return (
@@ -189,120 +212,129 @@ export const WorkforceCommand = ({
             className={`w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer ${colorClasses[dept.id].split(' ')[0]}`}
           />
 
-          {/* --- NEW: target selector, only shown inside espionage when agents are assigned --- */}
-          {dept.id === 'espionage' && allocation.espionage > 0 && (
-            <div className="mt-3 border-t border-slate-800 pt-3 space-y-2">
-              <span className="text-[10px] text-slate-500 uppercase tracking-widest">Target Designation</span>
+          {/* --- ANIMATED TARGET SELECTOR --- */}
+          {dept.id === 'espionage' && (
+            <AnimatePresence>
+              {allocation.espionage > 0 && (
+                <motion.div 
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="mt-3 border-t border-slate-800 pt-3 space-y-2">
+                    <span className="text-[10px] text-slate-500 uppercase tracking-widest">Target Designation</span>
 
-              {/* Dropdown trigger */}
-              <button
-                type="button"
-                onClick={() => setTargetDropdownOpen(o => !o)}
-                className="w-full flex justify-between items-center px-3 py-2 bg-black/40 border border-orange-900/40 hover:border-orange-500/50 text-[11px] text-left transition-colors"
-              >
-                <span className={selectedTarget ? 'text-orange-400 font-bold' : 'text-slate-500 italic'}>
-                  {selectedTarget === 'RANDOM' 
-                    ? '[?] RANDOM_TARGET' 
-                    : selectedTarget 
-                      ? `[${targets.find(t => t.user_id === selectedTarget)?.rank ?? '?'}] ${selectedTarget}` 
-                      : 'Select target...'}
-                </span>
-                <ChevronDown size={12} className={`text-slate-500 transition-transform ${targetDropdownOpen ? 'rotate-180' : ''}`} />
-              </button>
-
-              {/* Dropdown list */}
-              {targetDropdownOpen && (
-                <div className="border border-slate-800 bg-slate-950 divide-y divide-slate-800/60 max-h-48 overflow-y-auto">
-                  {/* RANDOM OPTION */}
-                  <button
-                    type="button"
-                    onClick={() => { onTargetChange('RANDOM'); setTargetDropdownOpen(false); }}
-                    className={`w-full px-3 py-2 text-left hover:bg-orange-950/30 transition-colors border-b border-orange-500/20 ${selectedTarget === 'RANDOM' ? 'bg-orange-950/20' : ''}`}
-                  >
-                    <div className="flex justify-between items-center">
-                      <span className="text-[11px] font-bold text-orange-500 uppercase flex items-center gap-1">
-                        <Skull size={10} /> Random Target
-                      </span>
-                      <span className="text-[9px] text-orange-900 font-mono">LUCK_BASED</span>
-                    </div>
-                  </button>
-
-                  {targets.length === 0 && (
-                    <p className="text-[10px] text-slate-600 italic px-3 py-2">No other players found.</p>
-                  )}
-                  {targets.map(entry => (
                     <button
-                      key={entry.user_id}
                       type="button"
-                      onClick={() => { onTargetChange(entry.user_id);; setTargetDropdownOpen(false); }}
-                      className={`w-full px-3 py-2 text-left hover:bg-orange-950/30 transition-colors ${selectedTarget === entry.user_id ? 'bg-orange-950/20' : ''}`}
+                      onClick={() => setTargetDropdownOpen(o => !o)}
+                      className="w-full flex justify-between items-center px-3 py-2 bg-black/40 border border-orange-900/40 hover:border-orange-500/50 text-[11px] text-left transition-colors"
                     >
-                      <div className="flex justify-between items-center">
-                        <span className="text-[11px] font-bold text-slate-300">{entry.user_id}</span>
-                        <span className="text-[10px] text-slate-500">Rank #{entry.rank}</span>
-                      </div>
+                      <span className={selectedTarget ? 'text-orange-400 font-bold' : 'text-slate-500 italic'}>
+                        {selectedTarget === 'RANDOM' 
+                          ? '[?] RANDOM_TARGET' 
+                          : selectedTarget 
+                            ? `[${targets.find(t => t.user_id === selectedTarget)?.rank ?? '?'}] ${selectedTarget}` 
+                            : 'Select target...'}
+                      </span>
+                      <ChevronDown size={12} className={`text-slate-500 transition-transform ${targetDropdownOpen ? 'rotate-180' : ''}`} />
                     </button>
-                  ))}
-                </div>
-              )}
 
-              {/* --- Unified Target Intel Card --- */}
-              {(selectedTarget === 'RANDOM' || selectedEntry) && (
-                <div className="mt-1 p-2 bg-black/40 border border-orange-900/30 rounded-sm animate-in fade-in duration-300">
-                  <div className="flex items-center gap-1.5 mb-2">
-                    <Skull size={10} className="text-orange-500" />
-                    <span className="text-[10px] text-orange-500 uppercase tracking-widest font-bold">
-                      {selectedTarget === 'RANDOM' ? 'Unconfirmed Intel' : 'Target Intel'}
-                    </span>
+                    <AnimatePresence>
+                      {targetDropdownOpen && (
+                        <motion.div 
+                          initial={{ opacity: 0, y: -10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -10 }}
+                          className="border border-slate-800 bg-slate-950 divide-y divide-slate-800/60 max-h-48 overflow-y-auto"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => { onTargetChange('RANDOM'); setTargetDropdownOpen(false); }}
+                            className={`w-full px-3 py-2 text-left hover:bg-orange-950/30 transition-colors border-b border-orange-500/20 ${selectedTarget === 'RANDOM' ? 'bg-orange-950/20' : ''}`}
+                          >
+                            <div className="flex justify-between items-center">
+                              <span className="text-[11px] font-bold text-orange-500 uppercase flex items-center gap-1">
+                                <Skull size={10} /> Random Target
+                              </span>
+                              <span className="text-[9px] text-orange-900 font-mono">LUCK_BASED</span>
+                            </div>
+                          </button>
+
+                          {targets.length === 0 && (
+                            <p className="text-[10px] text-slate-600 italic px-3 py-2">No other players found.</p>
+                          )}
+                          {targets.map(entry => (
+                            <button
+                              key={entry.user_id}
+                              type="button"
+                              onClick={() => { onTargetChange(entry.user_id); setTargetDropdownOpen(false); }}
+                              className={`w-full px-3 py-2 text-left hover:bg-orange-950/30 transition-colors ${selectedTarget === entry.user_id ? 'bg-orange-950/20' : ''}`}
+                            >
+                              <div className="flex justify-between items-center">
+                                <span className="text-[11px] font-bold text-slate-300">{entry.user_id}</span>
+                                <span className="text-[10px] text-slate-500">Rank #{entry.rank}</span>
+                              </div>
+                            </button>
+                          ))}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
+                    <AnimatePresence mode="wait">
+                      {(selectedTarget === 'RANDOM' || selectedEntry) && (
+                        <motion.div 
+                          key={selectedTarget || 'none'}
+                          initial={{ opacity: 0, scale: 0.98 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: 0.98 }}
+                          className="mt-1 p-2 bg-black/40 border border-orange-900/30 rounded-sm"
+                        >
+                          <div className="flex items-center gap-1.5 mb-2">
+                            <Skull size={10} className="text-orange-500" />
+                            <span className="text-[10px] text-orange-500 uppercase tracking-widest font-bold">
+                              {selectedTarget === 'RANDOM' ? 'Unconfirmed Intel' : 'Target Intel'}
+                            </span>
+                          </div>
+
+                          <div className="space-y-1">
+                            {/* ID Row */}
+                            <div className="flex justify-between text-[10px]">
+                              <span className="text-slate-500">ID</span>
+                              <span className="text-slate-300 font-mono">
+                                {selectedTarget === 'RANDOM' ? '?' : selectedEntry?.user_id}
+                              </span>
+                            </div>
+                            {/* ... remaining rows (Rank, Net Worth, etc) exactly as you had them ... */}
+                            <div className="flex justify-between text-[10px]">
+                              <span className="text-slate-500">Rank</span>
+                              <span className="text-slate-300">{selectedTarget === 'RANDOM' ? '?' : `#${selectedEntry?.rank}`}</span>
+                            </div>
+                            <div className="flex justify-between text-[10px]">
+                              <span className="text-slate-500">Net Worth</span>
+                              <span className="text-orange-400">{selectedTarget === 'RANDOM' ? '?' : `$${selectedEntry?.net_worth.toLocaleString()}`}</span>
+                            </div>
+                            <div className="flex justify-between text-[10px]">
+                              <span className="text-slate-500">Assets</span>
+                              <span className={selectedTarget === 'RANDOM' ? 'text-slate-600' : 'text-slate-300'}>
+                                {selectedTarget === 'RANDOM' ? '?' : (selectedEntry?.inventory === "Hidden" ? "Classified" : "")}
+                              </span>
+                            </div>
+                            {selectedTarget !== 'RANDOM' && selectedEntry?.inventory !== "Hidden" && (
+                              <div className="mt-1 pt-1 border-t border-slate-800 flex flex-wrap gap-1">
+                                {Object.entries(selectedEntry?.inventory || {}).map(([res, amt]) => (
+                                  <span key={res} className="text-[10px] px-2 py-1 bg-slate-800 text-slate-400">{amt}x {res}</span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
-
-                  <div className="space-y-1">
-                    {/* ID Row */}
-                    <div className="flex justify-between text-[10px]">
-                      <span className="text-slate-500">ID</span>
-                      <span className="text-slate-300 font-mono">
-                        {selectedTarget === 'RANDOM' ? '?' : selectedEntry?.user_id}
-                      </span>
-                    </div>
-
-                    {/* Rank Row */}
-                    <div className="flex justify-between text-[10px]">
-                      <span className="text-slate-500">Rank</span>
-                      <span className="text-slate-300">
-                        {selectedTarget === 'RANDOM' ? '?' : `#${selectedEntry?.rank}`}
-                      </span>
-                    </div>
-
-                    {/* Net Worth Row */}
-                    <div className="flex justify-between text-[10px]">
-                      <span className="text-slate-500">Net Worth</span>
-                      <span className="text-orange-400">
-                        {selectedTarget === 'RANDOM' ? '?' : `$${selectedEntry?.net_worth.toLocaleString()}`}
-                      </span>
-                    </div>
-
-                    {/* Assets Row */}
-                    <div className="flex justify-between text-[10px]">
-                      <span className="text-slate-500">Assets</span>
-                      <span className={selectedTarget === 'RANDOM' ? 'text-slate-600' : 'text-slate-300'}>
-                        {selectedTarget === 'RANDOM' ? '?' : (selectedEntry?.inventory === "Hidden" ? "Classified" : "Known")}
-                      </span>
-                    </div>
-
-                    {/* Detailed Assets (Only if real player and inventory is not hidden) */}
-                    {selectedTarget !== 'RANDOM' && selectedEntry?.inventory !== "Hidden" && (
-                      <div className="mt-1 pt-1 border-t border-slate-800 flex flex-wrap gap-1">
-                        {Object.entries(selectedEntry?.inventory || {}).map(([res, amt]) => (
-                          <span key={res} className="text-[9px] px-1.5 py-0.5 bg-slate-800 text-slate-400">
-                            {amt}x {res}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
+                </motion.div>
               )}
-            </div>
+            </AnimatePresence>
           )}
         </div>
       ))}

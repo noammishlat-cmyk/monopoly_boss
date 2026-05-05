@@ -42,7 +42,9 @@ export default function MonopolyBoss() {
     leaderboard,
     fetchLeaderboard,
     selectedTarget,
-    setSelectedTarget
+    setSelectedTarget,
+    activeVote,
+    castVote
   } = useGameState();
 
   const [activeTab, setActiveTab] = useState('workforce');
@@ -157,11 +159,11 @@ export default function MonopolyBoss() {
         <section className={`lg:col-span-3 space-y-6 ${activeTab === 'system' ? 'block' : 'hidden lg:block'}`}>
           {/* Voting Panel Integrated Here */}
           <VotingPanel 
-            prompt="Proposed Regulatory Modification: Corporate Tax Policy"
-            choices={choices}
+            prompt="Corporate governance vote — select a policy directive:"
+            choices={activeVote.choices}
             secondsRemaining={voteSecondsRemaining}
             playerBalance={userData.balance}
-            onCastVote={handleCastVote}
+            onCastVote={castVote}
           />
 
           <div className="flex-1">
