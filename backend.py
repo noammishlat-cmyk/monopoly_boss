@@ -27,7 +27,7 @@ COL_VOTE_RECORDS   = db.collection("vote_records")
 COL_SYSTEM         = db.collection("system")
 
 # ── CONFIGURATION ─────────────────────────────────────────────────────────────
-TICK_INTERVAL   = 60.0
+TICK_INTERVAL   = 5.0
 VOTE_INTERVAL   = 60.0 * 60
 
 MARKET_DECAY_RATE              = 0.05
@@ -544,6 +544,8 @@ def calculate_market_price(current_price, base_price, supply, demand, momentum, 
     diff            = target_price - current_price
     distance_ratio  = abs(diff) / max(current_price, 1)
     reaction_speed  = min(0.03 * (1 + distance_ratio), 0.15)
+    if diff < 0:
+        reaction_speed *= 0.5  # Prices drop slower than they rise
     movement        = diff * reaction_speed
 
     momentum_dampener = min(abs(diff) / base_price, 1.0)
